@@ -6,6 +6,9 @@ export struct FileEntry {
     name: string,
     size: string,
     uploaded-at: string,
+    content-type: string,
+    sha256: string,
+    expires-at: string,
 }
 
 // ── Desktop card: horizontal layout ──
@@ -17,13 +20,17 @@ component WideFileCard inherits Rectangle {
     callback download();
     callback delete-file();
     callback share();
+    callback select();
 
     background: touch.has-hover ? Style.surface-hover : Style.surface;
     border-radius: Style.radius-md;
     border-width: 1px;
     border-color: touch.has-hover ? Style.border : Style.divider;
 
-    touch := TouchArea { mouse-cursor: default; }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.select(); }
+    }
 
     HorizontalLayout {
         padding-left: Style.sp-lg;
@@ -113,11 +120,17 @@ component CompactFileCard inherits Rectangle {
     callback download();
     callback delete-file();
     callback share();
+    callback select();
 
-    background: Style.surface;
+    background: touch.has-hover ? Style.surface-hover : Style.surface;
     border-radius: Style.radius-md;
     border-width: 1px;
     border-color: Style.divider;
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.select(); }
+    }
 
     VerticalLayout {
         padding: Style.sp-sm;
@@ -181,6 +194,100 @@ component CompactFileCard inherits Rectangle {
     }
 }
 
+// ── Detail row: label + value ──
+component DetailRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+
+    spacing: Style.sp-sm;
+    padding-top: 1px;
+    padding-bottom: 1px;
+
+    Text {
+        text: root.label;
+        font-size: 11px;
+        font-weight: 600;
+        color: Style.text-hint;
+        width: 70px;
+    }
+
+    Text {
+        text: root.value;
+        font-size: 11px;
+        color: Style.text-primary;
+        overflow: elide;
+        horizontal-stretch: 1;
+    }
+}
+
+// ── File detail panel ──
+component FileDetailPanel inherits Rectangle {
+    in property <FileEntry> file;
+    in property <bool> compact: false;
+    callback close();
+    callback download();
+    callback delete-file();
+    callback share();
+
+    background: Style.surface;
+    border-radius: Style.radius-md;
+    border-width: 1px;
+    border-color: Style.border;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    VerticalLayout {
+        padding: Style.sp-md;
+        spacing: 2px;
+        alignment: start;
+
+        // Header: name + close
+        HorizontalLayout {
+            spacing: Style.sp-sm;
+            padding-bottom: Style.sp-xs;
+
+            Text {
+                text: root.file.name;
+                font-size: 14px;
+                font-weight: 600;
+                color: Style.text-primary;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+
+            Badge { label: root.file.size; fg: Style.primary; bg: Style.primary-light; }
+
+            GhostButton {
+                label: "X";
+                accent: Style.text-hint;
+                clicked => { root.close(); }
+            }
+        }
+
+        Rectangle { height: 1px; background: Style.divider; }
+
+        // Metadata rows
+        DetailRow { label: "ID"; value: root.file.id; }
+        DetailRow { label: "Uploaded"; value: root.file.uploaded-at; }
+        if root.file.content-type != "": DetailRow { label: "Type"; value: root.file.content-type; }
+        if root.file.sha256 != "": DetailRow { label: "SHA-256"; value: root.file.sha256; }
+        if root.file.expires-at != "": DetailRow { label: "Expires"; value: root.file.expires-at; }
+
+        Rectangle { height: 1px; background: Style.divider; }
+
+        // Action buttons
+        HorizontalLayout {
+            spacing: Style.sp-xs;
+            padding-top: Style.sp-xs;
+
+            GhostButton { label: "Download"; accent: Style.primary; clicked => { root.download(); } }
+            GhostButton { label: "Share"; accent: Style.success; clicked => { root.share(); } }
+            GhostButton { label: "Delete"; accent: Style.danger; clicked => { root.delete-file(); } }
+        }
+    }
+}
+
 component EmptyState inherits Rectangle {
     height: 200px;
 
@@ -215,6 +322,10 @@ export component FileListView inherits Rectangle {
     callback download(string);
     callback delete-file(string);
     callback share(string);
+
+    // Track selected file for detail view
+    property <int> selected-index: -1;
+    property <bool> showing-detail: selected-index >= 0 && selected-index < files.length;
 
     background: Style.background;
 
@@ -264,40 +375,71 @@ export component FileListView inherits Rectangle {
 
         if root.files.length == 0 && !root.loading: EmptyState {}
 
-        // ── Desktop list ──
-        if !root.compact: ListView {
+        // ── File list OR detail panel ──
+        // Always-present container so layout size is stable when switching views.
+        Rectangle {
             vertical-stretch: 1;
 
-            for file in root.files: Rectangle {
-                height: 76px;
-
-                WideFileCard {
-                    file-id: file.id;
-                    file-name: file.name;
-                    file-size: file.size;
-                    file-date: file.uploaded-at;
-                    download => { root.download(file.id); }
-                    delete-file => { root.delete-file(file.id); }
-                    share => { root.share(file.id); }
+            // Detail panel (overlays on top when visible)
+            if root.showing-detail: FileDetailPanel {
+                width: parent.width;
+                height: parent.height;
+                file: root.files[root.selected-index];
+                compact: root.compact;
+                close => { root.selected-index = -1; }
+                download => {
+                    root.download(root.files[root.selected-index].id);
+                    root.selected-index = -1;
+                }
+                delete-file => {
+                    root.delete-file(root.files[root.selected-index].id);
+                    root.selected-index = -1;
+                }
+                share => {
+                    root.share(root.files[root.selected-index].id);
+                    root.selected-index = -1;
                 }
             }
-        }
 
-        // ── Mobile list ──
-        if root.compact: ListView {
-            vertical-stretch: 1;
+            // Desktop file list (always present, hidden behind detail)
+            if !root.showing-detail && !root.compact: ListView {
+                width: parent.width;
+                height: parent.height;
 
-            for file in root.files: Rectangle {
-                height: 96px;
+                for file[i] in root.files: Rectangle {
+                    height: 76px;
 
-                CompactFileCard {
-                    file-id: file.id;
-                    file-name: file.name;
-                    file-size: file.size;
-                    file-date: file.uploaded-at;
-                    download => { root.download(file.id); }
-                    delete-file => { root.delete-file(file.id); }
-                    share => { root.share(file.id); }
+                    WideFileCard {
+                        file-id: file.id;
+                        file-name: file.name;
+                        file-size: file.size;
+                        file-date: file.uploaded-at;
+                        select => { root.selected-index = i; }
+                        download => { root.download(file.id); }
+                        delete-file => { root.delete-file(file.id); }
+                        share => { root.share(file.id); }
+                    }
+                }
+            }
+
+            // Mobile file list
+            if !root.showing-detail && root.compact: ListView {
+                width: parent.width;
+                height: parent.height;
+
+                for file[i] in root.files: Rectangle {
+                    height: 96px;
+
+                    CompactFileCard {
+                        file-id: file.id;
+                        file-name: file.name;
+                        file-size: file.size;
+                        file-date: file.uploaded-at;
+                        select => { root.selected-index = i; }
+                        download => { root.download(file.id); }
+                        delete-file => { root.delete-file(file.id); }
+                        share => { root.share(file.id); }
+                    }
                 }
             }
         }

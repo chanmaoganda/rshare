@@ -53,7 +53,9 @@ async fn main() {
     let client = reqwest::Client::new();
 
     let result = match cli.command {
-        Commands::Upload { file } => commands::upload(&client, &cli.server, &file).await,
+        Commands::Upload { file } => {
+            commands::upload(&client, &cli.server, &file, cli.token.as_deref()).await
+        }
         Commands::Download { id, output } => {
             commands::download(&client, &cli.server, &id, output.as_deref()).await
         }

@@ -19,4 +19,28 @@ pub struct Config {
     /// Admin token required for delete operations (if unset, deletes are open)
     #[arg(long, env = "RSHARE_ADMIN_TOKEN")]
     pub admin_token: Option<String>,
+
+    /// Create an API token: NAME:PERM1,PERM2 (e.g., "myapp:upload,download")
+    #[arg(long)]
+    pub create_token: Option<String>,
+
+    /// List all API tokens
+    #[arg(long)]
+    pub list_tokens: bool,
+
+    /// Revoke an API token by name
+    #[arg(long)]
+    pub revoke_token: Option<String>,
+
+    /// Default TTL for uploaded files in hours (0 = no expiry)
+    #[arg(long, default_value = "0")]
+    pub default_ttl_hours: u64,
+
+    /// Rate limit: max uploads per minute per IP
+    #[arg(long, default_value = "10")]
+    pub rate_limit_per_minute: u32,
+
+    /// Max concurrent uploads
+    #[arg(long, default_value = "4")]
+    pub max_concurrent_uploads: usize,
 }

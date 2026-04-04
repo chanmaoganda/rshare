@@ -2,20 +2,24 @@ use anyhow::{Context, Result, bail};
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
 use reqwest::multipart;
-use rshare_common::{FileListResponse, FileMetadata, UploadResponse};
+use rshare_common::{FileMetadata, UploadResponse};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use tokio::fs;
 
-pub async fn upload(client: &Client, server: &str, file_path: &Path) -> Result<()> {
+pub async fn upload(
+    client: &Client,
+    server: &str,
+    file_path: &Path,
+    token: Option<&str>,
+) -> Result<()> {
     let file_name = file_path
         .file_name()
         .context("Invalid file path")?
         .to_string_lossy()
         .to_string();
 
-    let data = fs::read(file_path)
-        .await
-        .context("Failed to read file")?;
+    let data = fs::read(file_path).await.context("Failed to read file")?;
 
     let size = data.len() as u64;
     let pb = ProgressBar::new(size);
@@ -30,12 +34,12 @@ pub async fn upload(client: &Client, server: &str, file_path: &Path) -> Result<(
         .mime_str("application/octet-stream")?;
     let form = multipart::Form::new().part("file", part);
 
-    let resp = client
-        .post(format!("{server}/api/upload"))
-        .multipart(form)
-        .send()
-        .await
-        .context("Failed to connect to server")?;
+    let mut req = client.post(format!("{server}/api/upload")).multipart(form);
+    if let Some(token) = token {
+        req = req.bearer_auth(token);
+    }
+
+    let resp = req.send().await.context("Failed to connect to server")?;
 
     pb.finish_with_message("uploaded");
 
@@ -46,12 +50,21 @@ pub async fn upload(client: &Client, server: &str, file_path: &Path) -> Result<(
 
     let info: UploadResponse = resp.json().await?;
     println!("Uploaded: {} (id: {})", info.name, info.id);
+    println!("SHA-256:  {}", info.sha256);
     println!("Delete token: {}", info.delete_token);
-    println!("  (use: rshare-cli -t {} delete {})", info.delete_token, info.id);
+    println!(
+        "  (use: rshare-cli -t {} delete {})",
+        info.delete_token, info.id
+    );
     Ok(())
 }
 
-pub async fn download(client: &Client, server: &str, id: &str, output: Option<&Path>) -> Result<()> {
+pub async fn download(
+    client: &Client,
+    server: &str,
+    id: &str,
+    output: Option<&Path>,
+) -> Result<()> {
     // First get metadata for filename and total size
     let meta_resp = client
         .get(format!("{server}/api/files/{id}"))
@@ -88,9 +101,7 @@ pub async fn download(client: &Client, server: &str, id: &str, output: Option<&P
 
     let resp = req.send().await?;
 
-    if !resp.status().is_success()
-        && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT
-    {
+    if !resp.status().is_success() && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
         let text = resp.text().await.unwrap_or_default();
         bail!("Download failed: {text}");
     }
@@ -124,6 +135,20 @@ pub async fn download(client: &Client, server: &str, id: &str, output: Option<&P
     }
 
     println!("Saved to: {}", out_path.display());
+
+    // Checksum verification
+    if let Some(expected_sha256) = &meta.sha256 {
+        let file_data = fs::read(&out_path).await?;
+        let actual = format!("{:x}", Sha256::digest(&file_data));
+        if actual == *expected_sha256 {
+            println!("Checksum OK: {actual}");
+        } else {
+            eprintln!("WARNING: Checksum mismatch!");
+            eprintln!("  Expected: {expected_sha256}");
+            eprintln!("  Actual:   {actual}");
+        }
+    }
+
     Ok(())
 }
 
@@ -139,16 +164,21 @@ pub async fn list(client: &Client, server: &str) -> Result<()> {
         bail!("List failed: {text}");
     }
 
-    let list: FileListResponse = resp.json().await?;
+    let body: serde_json::Value = resp.json().await?;
+    let files: Vec<FileMetadata> =
+        serde_json::from_value(body["files"].clone()).unwrap_or_default();
+    let total = body["total"].as_u64().unwrap_or(files.len() as u64);
+    let page = body["page"].as_u64().unwrap_or(1);
+    let per_page = body["per_page"].as_u64().unwrap_or(50);
 
-    if list.files.is_empty() {
+    if files.is_empty() {
         println!("No files on server.");
         return Ok(());
     }
 
-    println!("{:<38} {:<30} {:>10}  {}", "ID", "Name", "Size", "Uploaded");
+    println!("{:<38} {:<30} {:>10}  Uploaded", "ID", "Name", "Size");
     println!("{}", "-".repeat(95));
-    for f in &list.files {
+    for f in &files {
         let size_str = humanize_bytes(f.size);
         println!(
             "{:<38} {:<30} {:>10}  {}",
@@ -158,7 +188,13 @@ pub async fn list(client: &Client, server: &str) -> Result<()> {
             f.uploaded_at.format("%Y-%m-%d %H:%M")
         );
     }
-    println!("\n{} file(s)", list.files.len());
+    println!(
+        "\nShowing {} of {} file(s) (page {}, {} per page)",
+        files.len(),
+        total,
+        page,
+        per_page
+    );
     Ok(())
 }
 

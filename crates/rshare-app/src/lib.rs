@@ -109,12 +109,16 @@ fn setup_refresh(app: &App, api: &Arc<Api>) {
                         let entries: Vec<FileEntry> = files
                             .iter()
                             .map(|f| {
-                                let (id, name, size, date) = models::file_to_entry(f);
+                                let (id, name, size, date, content_type, sha256, expires_at) =
+                                    models::file_to_entry(f);
                                 FileEntry {
                                     id,
                                     name,
                                     size,
                                     uploaded_at: date,
+                                    content_type,
+                                    sha256,
+                                    expires_at,
                                 }
                             })
                             .collect();
@@ -158,7 +162,13 @@ fn setup_upload(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
             })
             .unwrap();
 
-            let result = api.upload(&server, &file.0, file.1).await;
+            let admin_token = store.get().admin_token;
+            let token = if admin_token.is_empty() {
+                None
+            } else {
+                Some(admin_token)
+            };
+            let result = api.upload(&server, &file.0, file.1, token.as_deref()).await;
 
             slint::invoke_from_event_loop(move || {
                 let app = weak.unwrap();
@@ -247,15 +257,13 @@ fn setup_delete(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
         let id = id.to_string();
 
         // Try stored delete token first, then admin token
-        let token = store
-            .get_delete_token(&id)
-            .or_else(|| {
-                if admin_token.is_empty() {
-                    None
-                } else {
-                    Some(admin_token)
-                }
-            });
+        let token = store.get_delete_token(&id).or_else(|| {
+            if admin_token.is_empty() {
+                None
+            } else {
+                Some(admin_token)
+            }
+        });
 
         tokio::spawn(async move {
             let result = api.delete(&server, &id, token.as_deref()).await;
@@ -338,10 +346,7 @@ async fn pick_file() -> Option<(String, Vec<u8>)> {
                 let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
                 let dominated = newest.as_ref().is_none_or(|(_, t)| modified > *t);
                 if dominated {
-                    newest = Some((
-                        entry.path().to_string_lossy().to_string(),
-                        modified,
-                    ));
+                    newest = Some((entry.path().to_string_lossy().to_string(), modified));
                 }
             }
         }

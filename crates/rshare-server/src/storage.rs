@@ -1,9 +1,19 @@
+use axum::body::Bytes;
+use futures::StreamExt;
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tokio::fs;
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 pub struct Storage {
     base_dir: PathBuf,
+}
+
+/// Result of streaming a file to disk.
+pub struct SaveResult {
+    pub size: u64,
+    pub sha256: String,
 }
 
 impl Storage {
@@ -19,12 +29,35 @@ impl Storage {
         self.base_dir.join(id.to_string())
     }
 
-    pub async fn save(&self, id: Uuid, data: &[u8]) -> std::io::Result<()> {
-        fs::write(self.file_path(id), data).await
+    /// Stream upload data to disk, computing SHA-256 and size incrementally.
+    pub async fn save_stream<S, E>(&self, id: Uuid, mut stream: S) -> std::io::Result<SaveResult>
+    where
+        S: futures::Stream<Item = Result<Bytes, E>> + Unpin,
+        E: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        let path = self.file_path(id);
+        let mut file = fs::File::create(&path).await?;
+        let mut hasher = Sha256::new();
+        let mut size: u64 = 0;
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(std::io::Error::other)?;
+            hasher.update(&chunk);
+            size += chunk.len() as u64;
+            file.write_all(&chunk).await?;
+        }
+
+        file.flush().await?;
+        let sha256 = format!("{:x}", hasher.finalize());
+        Ok(SaveResult { size, sha256 })
     }
 
-    pub async fn read(&self, id: Uuid) -> std::io::Result<Vec<u8>> {
-        fs::read(self.file_path(id)).await
+    /// Open a file for streaming download, returning the handle and total size.
+    pub async fn open_file(&self, id: Uuid) -> std::io::Result<(fs::File, u64)> {
+        let path = self.file_path(id);
+        let file = fs::File::open(&path).await?;
+        let metadata = file.metadata().await?;
+        Ok((file, metadata.len()))
     }
 
     pub async fn delete(&self, id: Uuid) -> std::io::Result<()> {

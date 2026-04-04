@@ -47,19 +47,21 @@ impl Api {
         server: &str,
         file_name: &str,
         data: Vec<u8>,
+        token: Option<&str>,
     ) -> Result<UploadResponse> {
         let part = multipart::Part::bytes(data)
             .file_name(file_name.to_string())
             .mime_str("application/octet-stream")?;
         let form = multipart::Form::new().part("file", part);
 
-        let resp = self
+        let mut req = self
             .client
             .post(format!("{server}/api/upload"))
-            .multipart(form)
-            .send()
-            .await
-            .context("Failed to connect to server")?;
+            .multipart(form);
+        if let Some(token) = token {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await.context("Failed to connect to server")?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -119,10 +121,7 @@ impl Api {
             bail!("Share failed: {text}");
         }
         let body: serde_json::Value = resp.json().await?;
-        let share_url = body["share_url"]
-            .as_str()
-            .unwrap_or("?")
-            .to_string();
+        let share_url = body["share_url"].as_str().unwrap_or("?").to_string();
         Ok(format!("{server}{share_url}"))
     }
 }
