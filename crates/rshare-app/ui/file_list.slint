@@ -1,5 +1,5 @@
 import { ListView } from "std-widgets.slint";
-import { Style, GhostButton, Badge, PrimaryButton } from "style.slint";
+import { Style, GhostButton, Badge } from "style.slint";
 
 export struct FileEntry {
     id: string,
@@ -8,7 +8,8 @@ export struct FileEntry {
     uploaded-at: string,
 }
 
-component FileCard inherits Rectangle {
+// ── Desktop card: horizontal layout ──
+component WideFileCard inherits Rectangle {
     in property <string> file-id;
     in property <string> file-name;
     in property <string> file-size;
@@ -17,15 +18,12 @@ component FileCard inherits Rectangle {
     callback delete-file();
     callback share();
 
-    height: 72px;
     background: touch.has-hover ? Style.surface-hover : Style.surface;
     border-radius: Style.radius-md;
     border-width: 1px;
     border-color: touch.has-hover ? Style.border : Style.divider;
 
-    touch := TouchArea {
-        mouse-cursor: default;
-    }
+    touch := TouchArea { mouse-cursor: default; }
 
     HorizontalLayout {
         padding-left: Style.sp-lg;
@@ -34,7 +32,6 @@ component FileCard inherits Rectangle {
         padding-bottom: Style.sp-md;
         spacing: Style.sp-lg;
 
-        // File icon
         Rectangle {
             width: 40px;
             height: 40px;
@@ -51,7 +48,6 @@ component FileCard inherits Rectangle {
             }
         }
 
-        // File info
         VerticalLayout {
             horizontal-stretch: 1;
             spacing: Style.sp-xs;
@@ -83,7 +79,6 @@ component FileCard inherits Rectangle {
             }
         }
 
-        // Actions
         HorizontalLayout {
             spacing: Style.sp-xs;
             alignment: center;
@@ -103,6 +98,83 @@ component FileCard inherits Rectangle {
             GhostButton {
                 label: "Delete";
                 accent: Style.danger;
+                clicked => { root.delete-file(); }
+            }
+        }
+    }
+}
+
+// ── Mobile card: stacked vertical layout ──
+component CompactFileCard inherits Rectangle {
+    in property <string> file-id;
+    in property <string> file-name;
+    in property <string> file-size;
+    in property <string> file-date;
+    callback download();
+    callback delete-file();
+    callback share();
+
+    background: Style.surface;
+    border-radius: Style.radius-md;
+    border-width: 1px;
+    border-color: Style.divider;
+
+    VerticalLayout {
+        padding: Style.sp-sm;
+        spacing: Style.sp-sm;
+
+        // Row 1: name + metadata
+        VerticalLayout {
+            spacing: 2px;
+
+            Text {
+                text: root.file-name;
+                font-size: 14px;
+                font-weight: 500;
+                color: Style.text-primary;
+                overflow: elide;
+            }
+
+            HorizontalLayout {
+                spacing: Style.sp-sm;
+
+                Badge {
+                    label: root.file-size;
+                    fg: Style.primary;
+                    bg: Style.primary-light;
+                }
+
+                Text {
+                    text: root.file-date;
+                    font-size: 11px;
+                    color: Style.text-hint;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Row 2: action buttons spread full width
+        HorizontalLayout {
+            spacing: Style.sp-xs;
+
+            GhostButton {
+                label: "Download";
+                accent: Style.primary;
+                horizontal-stretch: 1;
+                clicked => { root.download(); }
+            }
+
+            GhostButton {
+                label: "Share";
+                accent: Style.success;
+                horizontal-stretch: 1;
+                clicked => { root.share(); }
+            }
+
+            GhostButton {
+                label: "Delete";
+                accent: Style.danger;
+                horizontal-stretch: 1;
                 clicked => { root.delete-file(); }
             }
         }
@@ -138,6 +210,7 @@ export component FileListView inherits Rectangle {
     in property <bool> loading: false;
     in property <string> status-message: "";
     in property <bool> status-is-error: false;
+    in property <bool> compact: false;
     callback refresh();
     callback download(string);
     callback delete-file(string);
@@ -146,8 +219,8 @@ export component FileListView inherits Rectangle {
     background: Style.background;
 
     VerticalLayout {
-        padding-left: Style.sp-lg;
-        padding-right: Style.sp-lg;
+        padding-left: root.compact ? Style.sp-sm : Style.sp-lg;
+        padding-right: root.compact ? Style.sp-sm : Style.sp-lg;
         padding-top: Style.sp-md;
         padding-bottom: Style.sp-lg;
         spacing: Style.sp-sm;
@@ -189,16 +262,35 @@ export component FileListView inherits Rectangle {
             }
         }
 
-        // Empty state or file list
         if root.files.length == 0 && !root.loading: EmptyState {}
 
-        ListView {
+        // ── Desktop list ──
+        if !root.compact: ListView {
             vertical-stretch: 1;
 
             for file in root.files: Rectangle {
-                height: 80px;
+                height: 76px;
 
-                FileCard {
+                WideFileCard {
+                    file-id: file.id;
+                    file-name: file.name;
+                    file-size: file.size;
+                    file-date: file.uploaded-at;
+                    download => { root.download(file.id); }
+                    delete-file => { root.delete-file(file.id); }
+                    share => { root.share(file.id); }
+                }
+            }
+        }
+
+        // ── Mobile list ──
+        if root.compact: ListView {
+            vertical-stretch: 1;
+
+            for file in root.files: Rectangle {
+                height: 96px;
+
+                CompactFileCard {
                     file-id: file.id;
                     file-name: file.name;
                     file-size: file.size;

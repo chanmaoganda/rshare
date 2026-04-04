@@ -25,6 +25,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
+dirs = "6"
 
 [build-dependencies]
 slint-build = "1"
@@ -38,6 +39,13 @@ compile_sdk_version = 34
 
 [package.metadata.android.application]
 theme = "@android:style/Theme.DeviceDefault.NoActionBar"
+use_cleartext_traffic = true
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.ACCESS_NETWORK_STATE"
 
 [package.metadata.android.signing.release]
 path = "../../debug.keystore"

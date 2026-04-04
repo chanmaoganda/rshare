@@ -6,6 +6,7 @@ export component SettingsBar inherits Rectangle {
     in-out property <string> admin-token: "";
     in property <bool> connected: false;
     in property <string> status-message: "";
+    in property <bool> compact: false;
     callback connect();
 
     background: Style.surface;
@@ -14,8 +15,8 @@ export component SettingsBar inherits Rectangle {
     drop-shadow-color: #00000012;
 
     VerticalLayout {
-        padding: Style.sp-lg;
-        spacing: Style.sp-md;
+        padding: root.compact ? Style.sp-sm : Style.sp-lg;
+        spacing: Style.sp-sm;
 
         // Title + status
         HorizontalLayout {
@@ -24,7 +25,7 @@ export component SettingsBar inherits Rectangle {
 
             Text {
                 text: "rshare";
-                font-size: 22px;
+                font-size: 20px;
                 font-weight: 700;
                 color: Style.primary;
                 vertical-alignment: center;
@@ -37,8 +38,37 @@ export component SettingsBar inherits Rectangle {
             }
         }
 
-        // Connection inputs
-        HorizontalLayout {
+        // ── Compact layout (mobile): stack vertically ──
+        if root.compact: VerticalLayout {
+            spacing: Style.sp-sm;
+
+            LineEdit {
+                placeholder-text: "Server URL";
+                text <=> root.server-url;
+                font-size: 13px;
+            }
+
+            HorizontalLayout {
+                spacing: Style.sp-sm;
+
+                LineEdit {
+                    placeholder-text: "Token";
+                    text <=> root.admin-token;
+                    input-type: password;
+                    font-size: 13px;
+                    horizontal-stretch: 1;
+                }
+
+                PrimaryButton {
+                    label: root.connected ? "OK" : "Connect";
+                    enabled: !root.connected;
+                    clicked => { root.connect(); }
+                }
+            }
+        }
+
+        // ── Wide layout (desktop): single row ──
+        if !root.compact: HorizontalLayout {
             spacing: Style.sp-sm;
 
             LineEdit {

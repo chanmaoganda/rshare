@@ -1,23 +1,40 @@
 pub mod api;
 pub mod models;
+pub mod store;
 
 slint::include_modules!();
 
 use api::Api;
 use slint::{ModelRc, SharedString, VecModel};
 use std::sync::Arc;
+use store::Store;
 
 /// Create the Slint UI, wire all callbacks, and run the event loop.
 /// A tokio runtime must be active (entered) before calling this.
 pub fn run_app() {
     let app = App::new().unwrap();
     let api = Arc::new(Api::new());
+    let store = Arc::new(Store::load());
 
-    setup_connect(&app, &api);
+    // Set compact mode: always on Android, never on desktop
+    // (desktop users can resize but the layout is designed for wide screens)
+    #[cfg(target_os = "android")]
+    app.set_compact(true);
+
+    // Restore saved settings
+    let saved = store.get();
+    if !saved.server_url.is_empty() {
+        app.set_server_url(SharedString::from(&saved.server_url));
+    }
+    if !saved.admin_token.is_empty() {
+        app.set_admin_token(SharedString::from(&saved.admin_token));
+    }
+
+    setup_connect(&app, &api, &store);
     setup_refresh(&app, &api);
-    setup_upload(&app, &api);
+    setup_upload(&app, &api, &store);
     setup_download(&app, &api);
-    setup_delete(&app, &api);
+    setup_delete(&app, &api, &store);
     setup_share(&app, &api);
 
     app.run().unwrap();
@@ -34,19 +51,26 @@ fn android_main(android_app: slint::android::AndroidApp) {
     run_app();
 }
 
-fn setup_connect(app: &App, api: &Arc<Api>) {
+fn setup_connect(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
     let weak = app.as_weak();
     let api = api.clone();
+    let store = store.clone();
     app.on_connect(move || {
         let weak = weak.clone();
         let api = api.clone();
-        let server = weak.unwrap().get_server_url().to_string();
+        let store = store.clone();
+        let app_ref = weak.unwrap();
+        let server = app_ref.get_server_url().to_string();
+        let token = app_ref.get_admin_token().to_string();
         tokio::spawn(async move {
             let result = api.test_connection(&server).await;
+            let server2 = server.clone();
+            let token2 = token.clone();
             slint::invoke_from_event_loop(move || {
                 let app = weak.unwrap();
                 match result {
                     Ok(()) => {
+                        store.set_server(&server2, &token2);
                         app.set_connected(true);
                         app.set_settings_status(SharedString::from("Connected"));
                         app.invoke_refresh();
@@ -109,12 +133,14 @@ fn setup_refresh(app: &App, api: &Arc<Api>) {
     });
 }
 
-fn setup_upload(app: &App, api: &Arc<Api>) {
+fn setup_upload(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
     let weak = app.as_weak();
     let api = api.clone();
+    let store = store.clone();
     app.on_pick_and_upload(move || {
         let weak = weak.clone();
         let api = api.clone();
+        let store = store.clone();
         let server = weak.unwrap().get_server_url().to_string();
 
         tokio::spawn(async move {
@@ -139,9 +165,11 @@ fn setup_upload(app: &App, api: &Arc<Api>) {
                 app.set_uploading(false);
                 match result {
                     Ok(info) => {
+                        // Save the delete token locally
+                        store.add_delete_token(&info.id.to_string(), &info.delete_token);
                         app.set_upload_result(SharedString::from(format!(
-                            "Uploaded: {} (delete token: {})",
-                            info.name, info.delete_token
+                            "Uploaded: {}",
+                            info.name
                         )));
                         app.set_upload_is_error(false);
                         app.invoke_refresh();
@@ -205,29 +233,38 @@ fn setup_download(app: &App, api: &Arc<Api>) {
     });
 }
 
-fn setup_delete(app: &App, api: &Arc<Api>) {
+fn setup_delete(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
     let weak = app.as_weak();
     let api = api.clone();
+    let store = store.clone();
     app.on_delete_file(move |id| {
         let weak = weak.clone();
         let api = api.clone();
+        let store = store.clone();
         let app_ref = weak.unwrap();
         let server = app_ref.get_server_url().to_string();
-        let token = app_ref.get_admin_token().to_string();
+        let admin_token = app_ref.get_admin_token().to_string();
         let id = id.to_string();
 
+        // Try stored delete token first, then admin token
+        let token = store
+            .get_delete_token(&id)
+            .or_else(|| {
+                if admin_token.is_empty() {
+                    None
+                } else {
+                    Some(admin_token)
+                }
+            });
+
         tokio::spawn(async move {
-            let token_ref = if token.is_empty() {
-                None
-            } else {
-                Some(token.as_str())
-            };
-            let result = api.delete(&server, &id, token_ref).await;
+            let result = api.delete(&server, &id, token.as_deref()).await;
 
             slint::invoke_from_event_loop(move || {
                 let app = weak.unwrap();
                 match result {
                     Ok(()) => {
+                        store.remove_delete_token(&id);
                         app.set_list_status(SharedString::from("Deleted"));
                         app.set_list_status_is_error(false);
                         app.invoke_refresh();
@@ -275,7 +312,6 @@ fn setup_share(app: &App, api: &Arc<Api>) {
 
 // ── File picking / saving (platform-specific) ───────────────────
 
-/// Pick a file. Returns (filename, bytes) or None if cancelled.
 #[cfg(feature = "desktop")]
 async fn pick_file() -> Option<(String, Vec<u8>)> {
     let handle = rfd::AsyncFileDialog::new()
@@ -287,14 +323,13 @@ async fn pick_file() -> Option<(String, Vec<u8>)> {
     Some((name, data))
 }
 
-/// Pick a file on Android — read from /sdcard/Download by listing it.
-/// For a real app you'd want JNI to the SAF picker, but this works without JNI.
 #[cfg(not(feature = "desktop"))]
 async fn pick_file() -> Option<(String, Vec<u8>)> {
-    // On Android without JNI, we can't open a native file picker.
-    // As a fallback, read the most recently modified file from Download.
-    let download_dir = android_download_dir();
-    let mut entries = tokio::fs::read_dir(&download_dir).await.ok()?;
+    // On Android without JNI, scan the app's uploads directory for the newest file.
+    // Users should place files there via adb push or a file manager.
+    let upload_dir = store::app_data_dir().join("uploads");
+    let _ = tokio::fs::create_dir_all(&upload_dir).await;
+    let mut entries = tokio::fs::read_dir(&upload_dir).await.ok()?;
     let mut newest: Option<(String, std::time::SystemTime)> = None;
 
     while let Ok(Some(entry)) = entries.next_entry().await {
@@ -321,7 +356,6 @@ async fn pick_file() -> Option<(String, Vec<u8>)> {
     Some((name, data))
 }
 
-/// Save dialog on desktop via rfd.
 #[cfg(feature = "desktop")]
 async fn save_file(suggested_name: &str) -> Option<String> {
     let handle = rfd::AsyncFileDialog::new()
@@ -332,19 +366,10 @@ async fn save_file(suggested_name: &str) -> Option<String> {
     Some(handle.path().to_string_lossy().to_string())
 }
 
-/// Save on Android — write to Download directory.
 #[cfg(not(feature = "desktop"))]
 async fn save_file(suggested_name: &str) -> Option<String> {
-    let dir = android_download_dir();
+    let dir = store::app_data_dir().join("downloads");
     tokio::fs::create_dir_all(&dir).await.ok()?;
-    let path = format!("{dir}/{suggested_name}");
-    Some(path)
-}
-
-#[cfg(not(feature = "desktop"))]
-fn android_download_dir() -> String {
-    // Android app-specific external storage, or fall back to /sdcard/Download
-    std::env::var("EXTERNAL_STORAGE")
-        .map(|s| format!("{s}/Download"))
-        .unwrap_or_else(|_| "/sdcard/Download".to_string())
+    let path = dir.join(suggested_name);
+    Some(path.to_string_lossy().to_string())
 }

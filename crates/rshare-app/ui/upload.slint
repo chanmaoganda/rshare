@@ -1,39 +1,71 @@
-import { Style, PrimaryButton, Badge } from "style.slint";
+import { Style, PrimaryButton } from "style.slint";
 
 export component UploadPanel inherits Rectangle {
     in property <bool> uploading: false;
     in property <string> result-message: "";
     in property <bool> result-is-error: false;
+    in property <bool> compact: false;
     callback pick-and-upload();
 
     background: Style.background;
 
-    HorizontalLayout {
-        padding-left: Style.sp-lg;
-        padding-right: Style.sp-lg;
-        padding-top: Style.sp-md;
-        padding-bottom: Style.sp-md;
-        spacing: Style.sp-md;
-        alignment: start;
+    VerticalLayout {
+        padding-left: root.compact ? Style.sp-sm : Style.sp-lg;
+        padding-right: root.compact ? Style.sp-sm : Style.sp-lg;
+        padding-top: Style.sp-sm;
+        padding-bottom: Style.sp-sm;
+        spacing: Style.sp-sm;
 
-        PrimaryButton {
-            label: root.uploading ? "Uploading..." : "Upload File";
-            enabled: !root.uploading;
-            clicked => { root.pick-and-upload(); }
+        // ── Compact: button full width, result below ──
+        if root.compact: VerticalLayout {
+            spacing: Style.sp-sm;
+
+            PrimaryButton {
+                label: root.uploading ? "Uploading..." : "Upload File";
+                enabled: !root.uploading;
+                clicked => { root.pick-and-upload(); }
+            }
+
+            if root.result-message != "": Rectangle {
+                border-radius: Style.radius-sm;
+                background: root.result-is-error ? Style.danger-light : Style.success-light;
+                height: compact-result.preferred-height + 12px;
+
+                compact-result := Text {
+                    text: root.result-message;
+                    font-size: 12px;
+                    color: root.result-is-error ? Style.danger : Style.success;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+            }
         }
 
-        if root.result-message != "": Rectangle {
-            horizontal-stretch: 1;
-            border-radius: Style.radius-sm;
-            background: root.result-is-error ? Style.danger-light : Style.success-light;
+        // ── Wide: button + result side by side ──
+        if !root.compact: HorizontalLayout {
+            spacing: Style.sp-md;
+            alignment: start;
 
-            Text {
-                text: root.result-message;
-                font-size: 12px;
-                color: root.result-is-error ? Style.danger : Style.success;
-                wrap: word-wrap;
-                vertical-alignment: center;
-                horizontal-alignment: center;
+            PrimaryButton {
+                label: root.uploading ? "Uploading..." : "Upload File";
+                enabled: !root.uploading;
+                clicked => { root.pick-and-upload(); }
+            }
+
+            if root.result-message != "": Rectangle {
+                horizontal-stretch: 1;
+                border-radius: Style.radius-sm;
+                background: root.result-is-error ? Style.danger-light : Style.success-light;
+
+                Text {
+                    text: root.result-message;
+                    font-size: 12px;
+                    color: root.result-is-error ? Style.danger : Style.success;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
             }
         }
     }

@@ -13,6 +13,9 @@ export component App inherits Window {
     preferred-width: 900px;
     preferred-height: 600px;
 
+    // Responsive: set by Rust based on platform or window size
+    in-out property <bool> compact: false;
+
     // Settings state
     in-out property <string> server-url <=> settings.server-url;
     in-out property <string> admin-token <=> settings.admin-token;
@@ -39,24 +42,23 @@ export component App inherits Window {
     callback share(string);
 
     VerticalLayout {
-        // Top bar with shadow
         settings := SettingsBar {
+            compact: root.compact;
             connect => { root.connect(); }
         }
 
-        // Upload bar
         upload := UploadPanel {
+            compact: root.compact;
             pick-and-upload => { root.pick-and-upload(); }
         }
 
-        // Divider
         Rectangle {
             height: 1px;
             background: Style.divider;
         }
 
-        // File list fills remaining space
         file-list := FileListView {
+            compact: root.compact;
             vertical-stretch: 1;
             refresh => { root.refresh(); }
             download(id) => { root.download(id); }
