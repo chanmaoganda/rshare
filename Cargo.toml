@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "crates/rshare-common",
+    "crates/rshare-server",
+    "crates/rshare-cli",
+    "crates/rshare-gui",
+]
+resolver = "3"
