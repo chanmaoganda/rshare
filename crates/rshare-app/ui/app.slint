@@ -1,0 +1,67 @@
+import { VerticalBox } from "std-widgets.slint";
+import { Style } from "style.slint";
+import { SettingsBar } from "settings.slint";
+import { UploadPanel } from "upload.slint";
+import { FileListView, FileEntry } from "file_list.slint";
+
+export { FileEntry }
+
+export component App inherits Window {
+    title: "rshare";
+    background: Style.background;
+    default-font-size: 14px;
+    preferred-width: 900px;
+    preferred-height: 600px;
+
+    // Settings state
+    in-out property <string> server-url <=> settings.server-url;
+    in-out property <string> admin-token <=> settings.admin-token;
+    in property <bool> connected <=> settings.connected;
+    in property <string> settings-status <=> settings.status-message;
+
+    // Upload state
+    in property <bool> uploading <=> upload.uploading;
+    in property <string> upload-result <=> upload.result-message;
+    in property <bool> upload-is-error <=> upload.result-is-error;
+
+    // File list state
+    in property <[FileEntry]> files <=> file-list.files;
+    in property <bool> list-loading <=> file-list.loading;
+    in property <string> list-status <=> file-list.status-message;
+    in property <bool> list-status-is-error <=> file-list.status-is-error;
+
+    // Callbacks
+    callback connect();
+    callback pick-and-upload();
+    callback refresh();
+    callback download(string);
+    callback delete-file(string);
+    callback share(string);
+
+    VerticalLayout {
+        // Top bar with shadow
+        settings := SettingsBar {
+            connect => { root.connect(); }
+        }
+
+        // Upload bar
+        upload := UploadPanel {
+            pick-and-upload => { root.pick-and-upload(); }
+        }
+
+        // Divider
+        Rectangle {
+            height: 1px;
+            background: Style.divider;
+        }
+
+        // File list fills remaining space
+        file-list := FileListView {
+            vertical-stretch: 1;
+            refresh => { root.refresh(); }
+            download(id) => { root.download(id); }
+            delete-file(id) => { root.delete-file(id); }
+            share(id) => { root.share(id); }
+        }
+    }
+}

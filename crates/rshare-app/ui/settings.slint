@@ -1,0 +1,66 @@
+import { LineEdit } from "std-widgets.slint";
+import { Style, PrimaryButton, Badge } from "style.slint";
+
+export component SettingsBar inherits Rectangle {
+    in-out property <string> server-url: "http://localhost:3000";
+    in-out property <string> admin-token: "";
+    in property <bool> connected: false;
+    in property <string> status-message: "";
+    callback connect();
+
+    background: Style.surface;
+    drop-shadow-blur: 6px;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-color: #00000012;
+
+    VerticalLayout {
+        padding: Style.sp-lg;
+        spacing: Style.sp-md;
+
+        // Title + status
+        HorizontalLayout {
+            alignment: start;
+            spacing: Style.sp-md;
+
+            Text {
+                text: "rshare";
+                font-size: 22px;
+                font-weight: 700;
+                color: Style.primary;
+                vertical-alignment: center;
+            }
+
+            if root.status-message != "": Badge {
+                label: root.status-message;
+                fg: root.connected ? Style.success : Style.danger;
+                bg: root.connected ? Style.success-light : Style.danger-light;
+            }
+        }
+
+        // Connection inputs
+        HorizontalLayout {
+            spacing: Style.sp-sm;
+
+            LineEdit {
+                placeholder-text: "Server URL";
+                text <=> root.server-url;
+                horizontal-stretch: 3;
+                font-size: 13px;
+            }
+
+            LineEdit {
+                placeholder-text: "Admin token";
+                text <=> root.admin-token;
+                input-type: password;
+                horizontal-stretch: 1;
+                font-size: 13px;
+            }
+
+            PrimaryButton {
+                label: root.connected ? "Connected" : "Connect";
+                enabled: !root.connected;
+                clicked => { root.connect(); }
+            }
+        }
+    }
+}

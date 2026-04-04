@@ -9,9 +9,14 @@ cargo build                          # Build all crates (debug)
 cargo build --release                # Build all crates (release)
 cargo build -p rshare-server         # Build only the server
 cargo build -p rshare-cli            # Build only the CLI
-cargo build -p rshare-gui            # Build only the GUI
+cargo build -p rshare-app            # Build the Slint app (desktop + Android)
 cargo clippy --workspace             # Lint all crates
 cargo fmt --all -- --check           # Check formatting
+
+./build.sh desktop                   # Release build: server + CLI + app → dist/
+./build.sh android                   # Android .so (requires NDK)
+./build.sh server                    # Server only → dist/
+./build.sh all                       # Desktop + Android
 ```
 
 No tests exist yet. The project has no test infrastructure.
@@ -30,8 +35,8 @@ cargo run -p rshare-cli -- download <uuid>
 cargo run -p rshare-cli -- -t <token> delete <uuid>
 cargo run -p rshare-cli -- share <uuid>
 
-# GUI
-cargo run -p rshare-gui
+# Desktop GUI (Slint)
+cargo run -p rshare-app
 ```
 
 ## Architecture
@@ -41,7 +46,7 @@ Self-hosted file sharing service. Cargo workspace with 4 crates:
 - **rshare-common** — Shared serde types (`FileMetadata`, `UploadResponse`, `FileListResponse`, `ErrorResponse`). All crates depend on this.
 - **rshare-server** — Axum HTTP server. `AppState` holds `Arc<Db>` + `Arc<Storage>` + optional admin token. Routes defined in `main.rs`, handlers in `handlers.rs`.
 - **rshare-cli** — clap-based CLI client using reqwest. Subcommands dispatched from `main.rs` to functions in `commands.rs`.
-- **rshare-gui** — eframe/egui desktop app. `RshareApp` in `app.rs` composes three views (`upload`, `file_list`, `download`) from `views/` module. Runs a tokio runtime for async HTTP via poll-promise.
+- **rshare-app** — Slint-based cross-platform GUI (desktop + Android). `lib.rs` has `run_app()` shared entry + `android_main()` for Android. `desktop.rs` is the desktop binary. UI defined in `.slint` files under `ui/`. Uses `api.rs` for HTTP, `models.rs` for type conversion. Build for Android with `cargo-ndk` + `android` feature flag.
 
 ### Server internals
 
@@ -58,5 +63,5 @@ Two token types for delete: (1) per-file delete token returned on upload, (2) op
 
 Server: axum, rusqlite (bundled), tower-http, tokio
 CLI: clap, reqwest, indicatif (progress bars), anyhow
-GUI: eframe/egui, reqwest, rfd (file dialogs), poll-promise
+App: slint, reqwest, rfd (file dialogs), tokio
 All use Rust edition 2024.

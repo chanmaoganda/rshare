@@ -1,6 +1,6 @@
 # rshare
 
-A self-hosted file sharing service written in Rust. Upload, download, and share files through an HTTP API, CLI, or native desktop GUI.
+A self-hosted file sharing service written in Rust. Upload, download, and share files through an HTTP API, CLI, or cross-platform GUI (desktop + Android).
 
 ## Features
 
@@ -12,7 +12,7 @@ A self-hosted file sharing service written in Rust. Upload, download, and share 
 - **SQLite metadata** — lightweight, zero-config database
 - **File-on-disk storage** — uploaded files stored as plain files
 - **CLI client** — upload, download, list, delete, and share with progress bars
-- **Native GUI** — desktop app built with egui/eframe
+- **Cross-platform GUI** — Slint-based app for desktop (Linux/macOS/Windows) and Android
 
 ## Architecture
 
@@ -23,17 +23,21 @@ rshare is a Cargo workspace with four crates:
 | `rshare-common` | Shared types (`FileMetadata`, `UploadResponse`, etc.) |
 | `rshare-server` | Axum HTTP server with SQLite + file storage |
 | `rshare-cli` | Command-line client (clap + reqwest + indicatif) |
-| `rshare-gui` | Desktop GUI (eframe/egui + reqwest + rfd) |
+| `rshare-app` | Cross-platform GUI (Slint + reqwest + rfd) — desktop and Android |
 
 ## Quick Start
 
 ### Build
 
 ```bash
-cargo build --release
+# Build everything (debug)
+cargo build
+
+# Release build → dist/
+./build.sh desktop
 ```
 
-Binaries will be at `target/release/rshare-server`, `target/release/rshare-cli`, and `target/release/rshare-gui`.
+Binaries will be at `dist/rshare-server`, `dist/rshare-cli`, and `dist/rshare-app`.
 
 ### Run the server
 
@@ -94,17 +98,41 @@ rshare-cli share <id>
 | `--server`, `-s` | — | `http://localhost:3000` | Server URL |
 | `--token`, `-t` | `RSHARE_ADMIN_TOKEN` | *(none)* | Auth token (admin or delete) |
 
-## GUI
+## Desktop App
 
 ```bash
-rshare-gui
+rshare-app
 ```
 
-The desktop app provides:
+The Slint-based desktop app provides:
 - Server URL and token configuration
-- Drag-and-drop style file upload via file picker
+- File upload via native file picker
 - File list with download, delete, and share actions
-- Download progress tracking
+
+## Android
+
+Build the Android library (requires Android NDK):
+
+```bash
+# Prerequisites
+rustup target add aarch64-linux-android
+cargo install cargo-ndk
+export ANDROID_NDK_HOME=/path/to/ndk
+
+# Build
+./build.sh android
+```
+
+The `android` feature flag enables the Slint Android backend. The resulting `.so` is used in an Android APK via `cargo-apk` or a Gradle wrapper project.
+
+## Build Script
+
+```bash
+./build.sh desktop   # Server + CLI + desktop app → dist/
+./build.sh android   # Android .so → dist/
+./build.sh server    # Server only → dist/
+./build.sh all       # Everything
+```
 
 ## API Endpoints
 

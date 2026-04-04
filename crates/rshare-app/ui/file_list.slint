@@ -1,0 +1,213 @@
+import { ListView } from "std-widgets.slint";
+import { Style, GhostButton, Badge, PrimaryButton } from "style.slint";
+
+export struct FileEntry {
+    id: string,
+    name: string,
+    size: string,
+    uploaded-at: string,
+}
+
+component FileCard inherits Rectangle {
+    in property <string> file-id;
+    in property <string> file-name;
+    in property <string> file-size;
+    in property <string> file-date;
+    callback download();
+    callback delete-file();
+    callback share();
+
+    height: 72px;
+    background: touch.has-hover ? Style.surface-hover : Style.surface;
+    border-radius: Style.radius-md;
+    border-width: 1px;
+    border-color: touch.has-hover ? Style.border : Style.divider;
+
+    touch := TouchArea {
+        mouse-cursor: default;
+    }
+
+    HorizontalLayout {
+        padding-left: Style.sp-lg;
+        padding-right: Style.sp-md;
+        padding-top: Style.sp-md;
+        padding-bottom: Style.sp-md;
+        spacing: Style.sp-lg;
+
+        // File icon
+        Rectangle {
+            width: 40px;
+            height: 40px;
+            border-radius: Style.radius-sm;
+            background: Style.primary-light;
+
+            Text {
+                text: "F";
+                font-size: 16px;
+                font-weight: 700;
+                color: Style.primary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // File info
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: Style.sp-xs;
+            alignment: center;
+
+            Text {
+                text: root.file-name;
+                font-size: 14px;
+                font-weight: 500;
+                color: Style.text-primary;
+                overflow: elide;
+            }
+
+            HorizontalLayout {
+                spacing: Style.sp-sm;
+
+                Badge {
+                    label: root.file-size;
+                    fg: Style.primary;
+                    bg: Style.primary-light;
+                }
+
+                Text {
+                    text: root.file-date;
+                    font-size: 11px;
+                    color: Style.text-hint;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Actions
+        HorizontalLayout {
+            spacing: Style.sp-xs;
+            alignment: center;
+
+            GhostButton {
+                label: "Download";
+                accent: Style.primary;
+                clicked => { root.download(); }
+            }
+
+            GhostButton {
+                label: "Share";
+                accent: Style.success;
+                clicked => { root.share(); }
+            }
+
+            GhostButton {
+                label: "Delete";
+                accent: Style.danger;
+                clicked => { root.delete-file(); }
+            }
+        }
+    }
+}
+
+component EmptyState inherits Rectangle {
+    height: 200px;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: Style.sp-sm;
+
+        Text {
+            text: "No files";
+            font-size: 18px;
+            font-weight: 600;
+            color: Style.text-hint;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: "Upload a file to get started";
+            font-size: 13px;
+            color: Style.text-hint;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+export component FileListView inherits Rectangle {
+    in property <[FileEntry]> files: [];
+    in property <bool> loading: false;
+    in property <string> status-message: "";
+    in property <bool> status-is-error: false;
+    callback refresh();
+    callback download(string);
+    callback delete-file(string);
+    callback share(string);
+
+    background: Style.background;
+
+    VerticalLayout {
+        padding-left: Style.sp-lg;
+        padding-right: Style.sp-lg;
+        padding-top: Style.sp-md;
+        padding-bottom: Style.sp-lg;
+        spacing: Style.sp-sm;
+
+        // Header
+        HorizontalLayout {
+            alignment: space-between;
+
+            Text {
+                text: root.files.length > 0
+                    ? "\{root.files.length} file(s)"
+                    : "";
+                font-size: 13px;
+                font-weight: 500;
+                color: Style.text-secondary;
+                vertical-alignment: center;
+            }
+
+            GhostButton {
+                label: root.loading ? "Loading..." : "Refresh";
+                enabled: !root.loading;
+                clicked => { root.refresh(); }
+            }
+        }
+
+        // Status toast
+        if root.status-message != "": Rectangle {
+            height: 36px;
+            border-radius: Style.radius-sm;
+            background: root.status-is-error ? Style.danger-light : Style.success-light;
+
+            Text {
+                text: root.status-message;
+                font-size: 12px;
+                color: root.status-is-error ? Style.danger : Style.success;
+                wrap: word-wrap;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+        }
+
+        // Empty state or file list
+        if root.files.length == 0 && !root.loading: EmptyState {}
+
+        ListView {
+            vertical-stretch: 1;
+
+            for file in root.files: Rectangle {
+                height: 80px;
+
+                FileCard {
+                    file-id: file.id;
+                    file-name: file.name;
+                    file-size: file.size;
+                    file-date: file.uploaded-at;
+                    download => { root.download(file.id); }
+                    delete-file => { root.delete-file(file.id); }
+                    share => { root.share(file.id); }
+                }
+            }
+        }
+    }
+}

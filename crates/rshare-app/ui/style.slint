@@ -1,0 +1,123 @@
+export global Style {
+    // Primary palette
+    out property <color> primary: #1976D2;
+    out property <color> primary-hover: #1565C0;
+    out property <color> primary-light: #E3F2FD;
+    out property <color> primary-text: #FFFFFF;
+
+    // Semantic colors
+    out property <color> danger: #C62828;
+    out property <color> danger-hover: #B71C1C;
+    out property <color> danger-light: #FFEBEE;
+    out property <color> success: #2E7D32;
+    out property <color> success-light: #E8F5E9;
+    out property <color> warning: #E65100;
+    out property <color> warning-light: #FFF3E0;
+
+    // Surfaces
+    out property <color> background: #F0F2F5;
+    out property <color> surface: #FFFFFF;
+    out property <color> surface-hover: #F5F5F5;
+
+    // Text
+    out property <color> text-primary: #1A1A2E;
+    out property <color> text-secondary: #5A5A6E;
+    out property <color> text-hint: #9E9EA8;
+    out property <color> text-on-primary: #FFFFFF;
+
+    // Borders & dividers
+    out property <color> divider: #E8E8EE;
+    out property <color> border: #D4D4DE;
+    out property <color> border-focus: #1976D2;
+
+    // Spacing
+    out property <length> sp-xs: 4px;
+    out property <length> sp-sm: 8px;
+    out property <length> sp-md: 12px;
+    out property <length> sp-lg: 16px;
+    out property <length> sp-xl: 24px;
+
+    // Radius
+    out property <length> radius-sm: 6px;
+    out property <length> radius-md: 10px;
+    out property <length> radius-lg: 16px;
+    out property <length> radius-full: 100px;
+}
+
+// Styled primary button
+export component PrimaryButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 36px;
+    width: max(80px, btn-text.preferred-width + 32px);
+    border-radius: Style.radius-sm;
+    background: !root.enabled ? #B0BEC5 : touch.has-hover ? Style.primary-hover : Style.primary;
+
+    btn-text := Text {
+        text: root.label;
+        font-size: 13px;
+        font-weight: 600;
+        color: Style.text-on-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Styled outline/ghost button
+export component GhostButton inherits Rectangle {
+    in property <string> label;
+    in property <color> accent: Style.primary;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 32px;
+    width: max(64px, ghost-text.preferred-width + 24px);
+    border-radius: Style.radius-sm;
+    background: touch.has-hover ? root.accent.with-alpha(0.08) : transparent;
+    border-width: 1px;
+    border-color: root.accent.with-alpha(0.3);
+
+    ghost-text := Text {
+        text: root.label;
+        font-size: 12px;
+        font-weight: 500;
+        color: root.accent;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Colored badge / chip
+export component Badge inherits Rectangle {
+    in property <string> label;
+    in property <color> fg: Style.primary;
+    in property <color> bg: Style.primary-light;
+
+    height: 22px;
+    width: badge-text.preferred-width + 16px;
+    border-radius: 11px;
+    background: root.bg;
+
+    badge-text := Text {
+        text: root.label;
+        font-size: 11px;
+        font-weight: 500;
+        color: root.fg;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}

@@ -3,6 +3,6 @@ members = [
     "crates/rshare-common",
     "crates/rshare-server",
     "crates/rshare-cli",
-    "crates/rshare-gui",
+    "crates/rshare-app",
 ]
 resolver = "3"
