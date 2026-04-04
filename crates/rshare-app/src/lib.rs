@@ -49,7 +49,6 @@ fn setup_connect(app: &App, api: &Arc<Api>) {
                     Ok(()) => {
                         app.set_connected(true);
                         app.set_settings_status(SharedString::from("Connected"));
-                        // Auto-refresh on connect
                         app.invoke_refresh();
                     }
                     Err(e) => {
@@ -119,11 +118,9 @@ fn setup_upload(app: &App, api: &Arc<Api>) {
         let server = weak.unwrap().get_server_url().to_string();
 
         tokio::spawn(async move {
-            // Use rfd for file picking - works on desktop; on Android this would
-            // need platform-specific integration. For now, we use rfd where available.
-            let file = match rfd_pick_file().await {
+            let file = match pick_file().await {
                 Some(f) => f,
-                None => return, // user cancelled
+                None => return,
             };
 
             slint::invoke_from_event_loop({
@@ -183,10 +180,9 @@ fn setup_download(app: &App, api: &Arc<Api>) {
                 }
             };
 
-            // Save using rfd file dialog
-            let save_path = match rfd_save_file(&filename).await {
+            let save_path = match save_file(&filename).await {
                 Some(p) => p,
-                None => return, // user cancelled
+                None => return,
             };
 
             let write_result = tokio::fs::write(&save_path, &data).await;
@@ -277,8 +273,11 @@ fn setup_share(app: &App, api: &Arc<Api>) {
     });
 }
 
-/// Pick a file using rfd. Returns (filename, bytes) or None if cancelled.
-async fn rfd_pick_file() -> Option<(String, Vec<u8>)> {
+// ── File picking / saving (platform-specific) ───────────────────
+
+/// Pick a file. Returns (filename, bytes) or None if cancelled.
+#[cfg(feature = "desktop")]
+async fn pick_file() -> Option<(String, Vec<u8>)> {
     let handle = rfd::AsyncFileDialog::new()
         .set_title("Select file to upload")
         .pick_file()
@@ -288,12 +287,64 @@ async fn rfd_pick_file() -> Option<(String, Vec<u8>)> {
     Some((name, data))
 }
 
-/// Open a save dialog. Returns the chosen path or None if cancelled.
-async fn rfd_save_file(suggested_name: &str) -> Option<String> {
+/// Pick a file on Android — read from /sdcard/Download by listing it.
+/// For a real app you'd want JNI to the SAF picker, but this works without JNI.
+#[cfg(not(feature = "desktop"))]
+async fn pick_file() -> Option<(String, Vec<u8>)> {
+    // On Android without JNI, we can't open a native file picker.
+    // As a fallback, read the most recently modified file from Download.
+    let download_dir = android_download_dir();
+    let mut entries = tokio::fs::read_dir(&download_dir).await.ok()?;
+    let mut newest: Option<(String, std::time::SystemTime)> = None;
+
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if let Ok(meta) = entry.metadata().await {
+            if meta.is_file() {
+                let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+                let dominated = newest.as_ref().is_none_or(|(_, t)| modified > *t);
+                if dominated {
+                    newest = Some((
+                        entry.path().to_string_lossy().to_string(),
+                        modified,
+                    ));
+                }
+            }
+        }
+    }
+
+    let path = newest?.0;
+    let name = std::path::Path::new(&path)
+        .file_name()?
+        .to_string_lossy()
+        .to_string();
+    let data = tokio::fs::read(&path).await.ok()?;
+    Some((name, data))
+}
+
+/// Save dialog on desktop via rfd.
+#[cfg(feature = "desktop")]
+async fn save_file(suggested_name: &str) -> Option<String> {
     let handle = rfd::AsyncFileDialog::new()
         .set_title("Save downloaded file")
         .set_file_name(suggested_name)
         .save_file()
         .await?;
     Some(handle.path().to_string_lossy().to_string())
+}
+
+/// Save on Android — write to Download directory.
+#[cfg(not(feature = "desktop"))]
+async fn save_file(suggested_name: &str) -> Option<String> {
+    let dir = android_download_dir();
+    tokio::fs::create_dir_all(&dir).await.ok()?;
+    let path = format!("{dir}/{suggested_name}");
+    Some(path)
+}
+
+#[cfg(not(feature = "desktop"))]
+fn android_download_dir() -> String {
+    // Android app-specific external storage, or fall back to /sdcard/Download
+    std::env::var("EXTERNAL_STORAGE")
+        .map(|s| format!("{s}/Download"))
+        .unwrap_or_else(|_| "/sdcard/Download".to_string())
 }

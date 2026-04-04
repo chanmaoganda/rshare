@@ -12,14 +12,15 @@ name = "rshare-app"
 path = "src/desktop.rs"
 
 [features]
-default = []
+default = ["desktop"]
+desktop = ["dep:rfd"]
 android = ["slint/backend-android-activity-06"]
 
 [dependencies]
 rshare-common = { path = "../rshare-common" }
 slint = "1"
-reqwest = { version = "0.12", features = ["multipart", "json"] }
-rfd = "0.15"
+reqwest = { version = "0.12", default-features = false, features = ["multipart", "json", "rustls-tls"] }
+rfd = { version = "0.15", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -27,3 +28,19 @@ anyhow = "1"
 
 [build-dependencies]
 slint-build = "1"
+
+[package.metadata.android]
+package = "com.rshare.app"
+label = "rshare"
+target_sdk_version = 34
+min_sdk_version = 26
+compile_sdk_version = 34
+
+[package.metadata.android.application]
+theme = "@android:style/Theme.DeviceDefault.NoActionBar"
+
+[package.metadata.android.signing.release]
+path = "../../debug.keystore"
+keystore_password = "android"
+key_alias = "debug"
+key_password = "android"

@@ -4,6 +4,18 @@ set -euo pipefail
 DIST="dist"
 ANDROID_TARGET="aarch64-linux-android"
 
+resolve_android_jar() {
+    if [ -z "${ANDROID_JAR:-}" ]; then
+        local sdk="${ANDROID_HOME:-/opt/android-sdk}"
+        local platform
+        platform=$(ls -1d "$sdk/platforms/android-"* 2>/dev/null | sort -V | tail -1)
+        if [ -n "$platform" ] && [ -f "$platform/android.jar" ]; then
+            export ANDROID_JAR="$platform/android.jar"
+            echo "    Using ANDROID_JAR=$ANDROID_JAR"
+        fi
+    fi
+}
+
 usage() {
     echo "Usage: $0 [desktop|android|server|all]"
     echo ""
@@ -44,8 +56,8 @@ build_desktop_app() {
 build_android() {
     echo "==> Building rshare-app (Android APK)..."
 
-    if ! command -v cargo-ndk &>/dev/null; then
-        echo "Error: cargo-ndk not found. Install with: cargo install cargo-ndk"
+    if ! command -v cargo-apk &>/dev/null; then
+        echo "Error: cargo-apk not found. Install with: cargo install cargo-apk"
         exit 1
     fi
 
@@ -60,16 +72,16 @@ build_android() {
         exit 1
     fi
 
-    cargo ndk -t arm64-v8a build -p rshare-app --features android --release
+    resolve_android_jar
+
+    cargo apk build -p rshare-app --lib --no-default-features --features android --release
     mkdir -p "$DIST"
 
-    local so_path="target/$ANDROID_TARGET/release/librshare_app.so"
-    if [ -f "$so_path" ]; then
-        cp "$so_path" "$DIST/"
-        echo "    -> $DIST/librshare_app.so"
+    local apk_path="target/release/apk/rshare-app.apk"
+    if [ -f "$apk_path" ]; then
+        cp "$apk_path" "$DIST/"
+        echo "    -> $DIST/rshare-app.apk"
     fi
-
-    echo "    Note: To produce a full APK, use cargo-apk or integrate with a Gradle project."
 }
 
 build_desktop() {

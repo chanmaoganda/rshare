@@ -97,36 +97,38 @@ done
 if [ "$BUILD_ANDROID" = true ]; then
     ANDROID_TARGET="aarch64-linux-android"
 
-    if ! command -v cargo-ndk &>/dev/null; then
-        echo "==> Skipping Android (cargo-ndk not found)"
+    if ! command -v cargo-apk &>/dev/null; then
+        echo "==> Skipping Android (cargo-apk not found)"
     elif [ -z "${ANDROID_NDK_HOME:-}" ]; then
         echo "==> Skipping Android (ANDROID_NDK_HOME not set)"
     elif ! rustup target list --installed | grep -q "^${ANDROID_TARGET}$"; then
         echo "==> Skipping Android (target $ANDROID_TARGET not installed)"
     else
-        echo "==> Building Android ($ANDROID_TARGET)..."
-        cargo ndk -t arm64-v8a build -p rshare-app --features android --release
+        echo "==> Building Android APK ($ANDROID_TARGET)..."
 
-        ARCHIVE_NAME="rshare-${VERSION}-android"
-        STAGING="$RELEASE_DIR/$ARCHIVE_NAME"
-        mkdir -p "$STAGING"
-
-        so_path="target/$ANDROID_TARGET/release/librshare_app.so"
-        if [ -f "$so_path" ]; then
-            cp "$so_path" "$STAGING/"
-            echo "    + librshare_app.so"
+        # Resolve ANDROID_JAR for Slint's build script
+        if [ -z "${ANDROID_JAR:-}" ]; then
+            sdk="${ANDROID_HOME:-/opt/android-sdk}"
+            platform=$(ls -1d "$sdk/platforms/android-"* 2>/dev/null | sort -V | tail -1)
+            if [ -n "$platform" ] && [ -f "$platform/android.jar" ]; then
+                export ANDROID_JAR="$platform/android.jar"
+            fi
         fi
 
-        tar -czf "$RELEASE_DIR/$ARCHIVE_NAME.tar.gz" -C "$RELEASE_DIR" "$ARCHIVE_NAME"
-        rm -rf "$STAGING"
-        echo "    -> $ARCHIVE_NAME.tar.gz"
+        cargo apk build -p rshare-app --lib --no-default-features --features android --release
+
+        apk_path="target/release/apk/rshare-app.apk"
+        if [ -f "$apk_path" ]; then
+            cp "$apk_path" "$RELEASE_DIR/rshare-${VERSION}-android.apk"
+            echo "    -> rshare-${VERSION}-android.apk"
+        fi
     fi
 fi
 
 # ─── Checksums ──────────────────────────────────────────────────
 echo "==> Generating checksums..."
 cd "$RELEASE_DIR"
-sha256sum *.tar.gz *.zip 2>/dev/null > SHA256SUMS.txt || true
+sha256sum *.tar.gz *.zip *.apk 2>/dev/null > SHA256SUMS.txt || true
 cd ..
 
 # ─── Summary ────────────────────────────────────────────────────
