@@ -52,7 +52,7 @@ impl FileListView {
         }));
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, server: &str) -> Option<FileAction> {
+    pub fn ui(&mut self, ui: &mut egui::Ui, server: &str, admin_token: Option<&str>) -> Option<FileAction> {
         let mut action = None;
 
         // Check refresh completion
@@ -165,18 +165,23 @@ impl FileListView {
                             if ui.button("🗑 Delete").clicked() {
                                 let server = server.to_string();
                                 let id = file.id;
+                                let token = admin_token.map(|s| s.to_string());
                                 self.delete_promise =
                                     Some(Promise::spawn_async(async move {
                                         let client = reqwest::Client::new();
-                                        let resp = client
-                                            .delete(format!("{server}/api/files/{id}"))
-                                            .send()
+                                        let mut req = client
+                                            .delete(format!("{server}/api/files/{id}"));
+                                        if let Some(token) = &token {
+                                            req = req.bearer_auth(token);
+                                        }
+                                        let resp = req.send()
                                             .await
                                             .map_err(|e| e.to_string())?;
                                         if resp.status().is_success() {
                                             Ok(())
                                         } else {
-                                            Err("Delete failed".to_string())
+                                            let text = resp.text().await.unwrap_or_default();
+                                            Err(format!("Delete failed: {text}"))
                                         }
                                     }));
                             }

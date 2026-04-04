@@ -46,11 +46,13 @@ pub async fn upload(client: &Client, server: &str, file_path: &Path) -> Result<(
 
     let info: UploadResponse = resp.json().await?;
     println!("Uploaded: {} (id: {})", info.name, info.id);
+    println!("Delete token: {}", info.delete_token);
+    println!("  (use: rshare-cli -t {} delete {})", info.delete_token, info.id);
     Ok(())
 }
 
 pub async fn download(client: &Client, server: &str, id: &str, output: Option<&Path>) -> Result<()> {
-    // First get metadata for filename
+    // First get metadata for filename and total size
     let meta_resp = client
         .get(format!("{server}/api/files/{id}"))
         .send()
@@ -64,15 +66,36 @@ pub async fn download(client: &Client, server: &str, id: &str, output: Option<&P
 
     let meta: FileMetadata = meta_resp.json().await?;
 
-    let resp = client
-        .get(format!("{server}/api/download/{id}"))
-        .send()
-        .await?;
+    let out_path = output
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| Path::new(&meta.name).to_path_buf());
 
-    if !resp.status().is_success() {
+    // Check if partial file exists for resume
+    let existing_len = if out_path.exists() {
+        fs::metadata(&out_path).await?.len()
+    } else {
+        0
+    };
+
+    let mut req = client.get(format!("{server}/api/download/{id}"));
+    if existing_len > 0 && existing_len < meta.size {
+        println!("Resuming download from byte {existing_len}...");
+        req = req.header("Range", format!("bytes={existing_len}-"));
+    } else if existing_len == meta.size {
+        println!("File already fully downloaded: {}", out_path.display());
+        return Ok(());
+    }
+
+    let resp = req.send().await?;
+
+    if !resp.status().is_success()
+        && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT
+    {
         let text = resp.text().await.unwrap_or_default();
         bail!("Download failed: {text}");
     }
+
+    let is_resume = resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
 
     let pb = ProgressBar::new(meta.size);
     pb.set_style(
@@ -80,16 +103,26 @@ pub async fn download(client: &Client, server: &str, id: &str, output: Option<&P
             .template("{spinner:.green} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")?
             .progress_chars("#>-"),
     );
+    if is_resume {
+        pb.set_position(existing_len);
+    }
 
     let data = resp.bytes().await?;
-    pb.set_position(data.len() as u64);
+    pb.set_position(existing_len + data.len() as u64);
     pb.finish_with_message("downloaded");
 
-    let out_path = output
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| Path::new(&meta.name).to_path_buf());
+    if is_resume {
+        // Append to existing file
+        use tokio::io::AsyncWriteExt;
+        let mut file = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&out_path)
+            .await?;
+        file.write_all(&data).await?;
+    } else {
+        fs::write(&out_path, &data).await?;
+    }
 
-    fs::write(&out_path, &data).await?;
     println!("Saved to: {}", out_path.display());
     Ok(())
 }
@@ -129,12 +162,12 @@ pub async fn list(client: &Client, server: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn delete(client: &Client, server: &str, id: &str) -> Result<()> {
-    let resp = client
-        .delete(format!("{server}/api/files/{id}"))
-        .send()
-        .await
-        .context("Failed to connect to server")?;
+pub async fn delete(client: &Client, server: &str, id: &str, token: Option<&str>) -> Result<()> {
+    let mut req = client.delete(format!("{server}/api/files/{id}"));
+    if let Some(token) = token {
+        req = req.bearer_auth(token);
+    }
+    let resp = req.send().await.context("Failed to connect to server")?;
 
     if resp.status().is_success() {
         println!("Deleted: {id}");

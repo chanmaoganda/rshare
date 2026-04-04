@@ -4,6 +4,7 @@ mod handlers;
 mod storage;
 
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, post};
 use clap::Parser;
 use std::sync::Arc;
@@ -18,6 +19,7 @@ use storage::Storage;
 pub struct AppState {
     pub db: Arc<Db>,
     pub storage: Arc<Storage>,
+    pub admin_token: Option<String>,
 }
 
 #[tokio::main]
@@ -38,9 +40,16 @@ async fn main() {
         .await
         .expect("Failed to init storage");
 
+    if cfg.admin_token.is_some() {
+        tracing::info!("Admin token is set — delete requires authorization");
+    } else {
+        tracing::warn!("No admin token set — delete is open to anyone");
+    }
+
     let state = AppState {
         db: Arc::new(db),
         storage: Arc::new(storage),
+        admin_token: cfg.admin_token,
     };
 
     let app = Router::new()
@@ -51,6 +60,7 @@ async fn main() {
         .route("/api/download/{id}", get(handlers::download))
         .route("/api/share/{id}", post(handlers::share_create))
         .route("/share/{token}", get(handlers::share_download))
+        .layer(DefaultBodyLimit::max(cfg.max_upload_mb * 1024 * 1024))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state);

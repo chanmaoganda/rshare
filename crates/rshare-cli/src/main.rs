@@ -10,6 +10,10 @@ struct Cli {
     #[arg(short, long, default_value = "http://localhost:3000")]
     server: String,
 
+    /// Admin token for protected operations (delete)
+    #[arg(short = 't', long, env = "RSHARE_ADMIN_TOKEN")]
+    token: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -54,7 +58,9 @@ async fn main() {
             commands::download(&client, &cli.server, &id, output.as_deref()).await
         }
         Commands::List => commands::list(&client, &cli.server).await,
-        Commands::Delete { id } => commands::delete(&client, &cli.server, &id).await,
+        Commands::Delete { id } => {
+            commands::delete(&client, &cli.server, &id, cli.token.as_deref()).await
+        }
         Commands::Share { id } => commands::share(&client, &cli.server, &id).await,
     };
 

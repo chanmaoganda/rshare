@@ -19,27 +19,48 @@ impl Db {
                 name TEXT NOT NULL,
                 size INTEGER NOT NULL,
                 uploaded_at TEXT NOT NULL,
-                share_token TEXT
+                share_token TEXT,
+                delete_token TEXT
             );",
         )?;
+        // Safe migration for existing databases
+        let has_delete_token: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('files') WHERE name = 'delete_token'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|c| c > 0)?;
+        if !has_delete_token {
+            conn.execute_batch("ALTER TABLE files ADD COLUMN delete_token TEXT;")?;
+        }
         Ok(Self {
             conn: Mutex::new(conn),
         })
     }
 
-    pub fn insert(&self, meta: &FileMetadata) -> Result<(), rusqlite::Error> {
+    pub fn insert(&self, meta: &FileMetadata, delete_token: &str) -> Result<(), rusqlite::Error> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO files (id, name, size, uploaded_at, share_token) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO files (id, name, size, uploaded_at, share_token, delete_token) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 meta.id.to_string(),
                 meta.name,
                 meta.size as i64,
                 meta.uploaded_at.to_rfc3339(),
                 meta.share_token,
+                delete_token,
             ],
         )?;
         Ok(())
+    }
+
+    pub fn get_delete_token(&self, id: Uuid) -> Result<Option<String>, rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT delete_token FROM files WHERE id = ?1")?;
+        let mut rows = stmt.query_map(params![id.to_string()], |row| row.get(0))?;
+        match rows.next() {
+            Some(Ok(token)) => Ok(token),
+            Some(Err(e)) => Err(e),
+            None => Ok(None),
+        }
     }
 
     pub fn list(&self) -> Result<Vec<FileMetadata>, rusqlite::Error> {

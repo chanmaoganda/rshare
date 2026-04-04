@@ -15,4 +15,8 @@ pub struct Config {
     /// Maximum upload size in megabytes
     #[arg(long, default_value = "512")]
     pub max_upload_mb: usize,
+
+    /// Admin token required for delete operations (if unset, deletes are open)
+    #[arg(long, env = "RSHARE_ADMIN_TOKEN")]
+    pub admin_token: Option<String>,
 }

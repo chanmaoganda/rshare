@@ -16,6 +16,7 @@ pub struct UploadResponse {
     pub id: Uuid,
     pub name: String,
     pub size: u64,
+    pub delete_token: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

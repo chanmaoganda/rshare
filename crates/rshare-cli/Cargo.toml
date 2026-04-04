@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 rshare-common = { path = "../rshare-common" }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 reqwest = { version = "0.12", features = ["multipart", "stream", "json"] }
 tokio = { version = "1", features = ["full"] }
 indicatif = "0.17"
