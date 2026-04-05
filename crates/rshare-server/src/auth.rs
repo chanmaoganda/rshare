@@ -80,9 +80,7 @@ impl FromRequestParts<AppState> for AuthContext {
         }
 
         if let Some(token) = resolve_token(parts, state) {
-            return Ok(AuthContext {
-                token: Some(token),
-            });
+            return Ok(AuthContext { token: Some(token) });
         }
 
         // Token required but not provided or invalid
