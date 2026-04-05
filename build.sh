@@ -88,8 +88,15 @@ build_desktop() {
     build_server
     build_cli
     build_desktop_app
+
+    # Pack into tar.gz
+    echo "==> Packaging binaries..."
+    local archive="rshare-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+    tar -czf "$DIST/$archive.tar.gz" -C "$DIST" rshare-server rshare-cli rshare-app
+    rm "$DIST/rshare-server" "$DIST/rshare-cli" "$DIST/rshare-app"
+
     echo ""
-    echo "Desktop build complete. Binaries in $DIST/"
+    echo "Desktop build complete: $DIST/$archive.tar.gz"
 }
 
 build_all() {
