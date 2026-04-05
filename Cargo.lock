@@ -4766,7 +4766,7 @@ dependencies = [
 
 [[package]]
 name = "rshare-app"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "dirs",
@@ -4782,10 +4782,11 @@ dependencies = [
 
 [[package]]
 name = "rshare-cli"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "clap",
+ "dirs",
  "indicatif",
  "reqwest",
  "rshare-common",
@@ -4798,7 +4799,7 @@ dependencies = [
 
 [[package]]
 name = "rshare-common"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "serde",
@@ -4808,7 +4809,7 @@ dependencies = [
 
 [[package]]
 name = "rshare-server"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axum",
  "chrono",

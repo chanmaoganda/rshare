@@ -3,6 +3,19 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+#[cfg(target_os = "android")]
+use std::sync::OnceLock;
+
+#[cfg(target_os = "android")]
+static ANDROID_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+#[cfg(target_os = "android")]
+pub fn set_android_data_dir(path: PathBuf) {
+    ANDROID_DATA_DIR
+        .set(path)
+        .expect("android data dir already set");
+}
+
 /// Persisted app state: server settings + per-file delete tokens.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppStore {
@@ -76,7 +89,9 @@ impl Store {
             let _ = std::fs::create_dir_all(parent);
         }
         let json = serde_json::to_string_pretty(&*data).unwrap_or_default();
-        let _ = std::fs::write(&self.path, json);
+        if let Err(e) = std::fs::write(&self.path, &json) {
+            eprintln!("[rshare] Failed to write config to {:?}: {e}", self.path);
+        }
     }
 }
 
@@ -86,9 +101,10 @@ impl Store {
 pub fn app_data_dir() -> PathBuf {
     #[cfg(target_os = "android")]
     {
-        // App private internal storage — no permissions required.
-        // Matches package name in Cargo.toml metadata.
-        PathBuf::from("/data/data/com.rshare.app/files")
+        ANDROID_DATA_DIR
+            .get()
+            .expect("android data dir not initialized — set_android_data_dir() must be called first")
+            .clone()
     }
 
     #[cfg(not(target_os = "android"))]

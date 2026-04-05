@@ -60,8 +60,7 @@ export component SettingsBar inherits Rectangle {
                 }
 
                 PrimaryButton {
-                    label: root.connected ? "OK" : "Connect";
-                    enabled: !root.connected;
+                    label: root.connected ? "Reconnect" : "Connect";
                     clicked => { root.connect(); }
                 }
             }
@@ -87,8 +86,7 @@ export component SettingsBar inherits Rectangle {
             }
 
             PrimaryButton {
-                label: root.connected ? "Connected" : "Connect";
-                enabled: !root.connected;
+                label: root.connected ? "Reconnect" : "Connect";
                 clicked => { root.connect(); }
             }
         }

@@ -14,6 +14,8 @@ cargo fmt --all -- --check           # Format check
 ./build.sh desktop                   # Release: server + CLI + app -> dist/
 ./build.sh android                   # Android APK -> dist/rshare-app.apk
 ./build.sh all                       # Both
+./build-debug.sh                     # Debug Android APK -> dist/rshare-app-debug.apk
+./build-debug.sh --install           # Debug APK + install via adb
 ./release.sh 0.1.0                   # Package release archives -> release/
 ./release.sh 0.1.0 --android         # Include Android APK
 ```
@@ -49,12 +51,13 @@ cargo run -p rshare-server -- --create-token myapp:upload,download
 cargo run -p rshare-server -- --list-tokens
 cargo run -p rshare-server -- --revoke-token myapp
 
-# CLI
-cargo run -p rshare-cli -- upload myfile.zip
-cargo run -p rshare-cli -- -t <token> upload myfile.zip  # Auth token for upload
+# CLI (reads server URL + token from ~/.config/rshare/config.json if not specified)
+cargo run -p rshare-cli -- upload myfile.zip              # Uses saved config
+cargo run -p rshare-cli -- -s http://host:port upload f   # Override server
+cargo run -p rshare-cli -- -t <token> upload myfile.zip   # Override token
 cargo run -p rshare-cli -- list
 cargo run -p rshare-cli -- download <uuid>
-cargo run -p rshare-cli -- -t <token> delete <uuid>
+cargo run -p rshare-cli -- delete <uuid>
 cargo run -p rshare-cli -- share <uuid>
 
 # Desktop GUI + Android
@@ -77,11 +80,11 @@ Self-hosted file sharing service. Cargo workspace with 4 crates:
 
 Dual-target crate: `cdylib` for Android, `rlib` + binary for desktop.
 
-- `lib.rs` -- `run_app()` shared entry point + `android_main()` (cfg'd for Android). Wires all Slint callbacks to async handlers via `tokio::spawn` + `slint::invoke_from_event_loop`.
+- `lib.rs` -- `run_app()` shared entry point + `android_main()` (cfg'd for Android). Wires all Slint callbacks to async handlers via `tokio::spawn` + `slint::invoke_from_event_loop`. Auto-connects on startup if saved config exists. Auto-refreshes file list every 3 seconds while connected.
 - `desktop.rs` -- Desktop binary entry: creates tokio runtime, calls `run_app()`.
 - `api.rs` -- reqwest HTTP client wrapping all server REST endpoints.
 - `models.rs` -- Converts `rshare-common` types to Slint `FileEntry` structs.
-- `store.rs` -- JSON persistence for server URL, admin token, and per-file delete tokens. Stored at `~/.config/rshare/config.json` (desktop) or `/data/data/com.rshare.app/files/config.json` (Android). `app_data_dir()` is the canonical path function.
+- `store.rs` -- JSON persistence for server URL, admin token, and per-file delete tokens. Stored at `~/.config/rshare/config.json` (desktop) or runtime `internal_data_path()` on Android. `app_data_dir()` is the canonical path function. On Android, `set_android_data_dir()` must be called before any store access (done in `android_main()`). The CLI also reads this config as fallback for `--server` and `--token`.
 - `ui/*.slint` -- Declarative UI. Material style (`build.rs`). Responsive via `compact` property (true on Android, false on desktop). Custom components: `PrimaryButton`, `GhostButton`, `Badge` in `style.slint`.
 
 Feature flags: `desktop` (default, enables `rfd` file dialogs), `android` (enables Slint Android backend). Build Android with `--no-default-features --features android`.
@@ -130,13 +133,16 @@ New columns are added via `pragma_table_info` checks + `ALTER TABLE ADD COLUMN` 
 
 - `use_cleartext_traffic = true` in manifest -- needed for LAN HTTP connections.
 - Uses `rustls-tls` instead of OpenSSL (can't cross-compile OpenSSL for Android).
-- No `rfd` on Android -- file picking reads from app-private `uploads/` dir, downloads go to `downloads/` dir.
+- No `rfd` on Android -- file picking reads from app-private `uploads/` dir, downloads go to `/sdcard/Download/rshare/` (public, user-accessible).
+- Android data path is queried at runtime via `AndroidApp::internal_data_path()` -- never hardcode `/data/data/...` paths.
+- Debug APK (`build-debug.sh`) allows `adb shell run-as com.rshare.app` for inspecting app data. Release and debug APKs have different signatures -- must `adb uninstall com.rshare.app` when switching between them.
 - Signing uses `debug.keystore` at repo root (gitignored). Generate with `keytool`.
 - Android SDK platform symlink may be needed: `ln -sf android-34 android-30` in `$ANDROID_HOME/platforms/`.
+- Permissions: INTERNET, ACCESS_NETWORK_STATE, WRITE/READ_EXTERNAL_STORAGE, MANAGE_EXTERNAL_STORAGE (for public Downloads access).
 
 ## Key Dependencies
 
 Server: axum, rusqlite (bundled), tower-http, tokio, tokio-util, clap, sha2, futures, mime_guess
-CLI: clap, reqwest (stream), indicatif, anyhow, sha2
+CLI: clap, reqwest (stream), indicatif, anyhow, sha2, dirs
 App: slint (material style), reqwest (rustls-tls), rfd (desktop only), tokio, dirs, serde_json
 All: Rust edition 2024

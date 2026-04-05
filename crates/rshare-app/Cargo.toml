@@ -40,12 +40,22 @@ compile_sdk_version = 34
 [package.metadata.android.application]
 theme = "@android:style/Theme.DeviceDefault.NoActionBar"
 use_cleartext_traffic = true
+request_legacy_external_storage = true
 
 [[package.metadata.android.uses_permission]]
 name = "android.permission.INTERNET"
 
 [[package.metadata.android.uses_permission]]
 name = "android.permission.ACCESS_NETWORK_STATE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.WRITE_EXTERNAL_STORAGE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.READ_EXTERNAL_STORAGE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.MANAGE_EXTERNAL_STORAGE"
 
 [package.metadata.android.signing.release]
 path = "../../debug.keystore"

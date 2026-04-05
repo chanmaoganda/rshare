@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=rshare
+Comment=Self-hosted file sharing
+Exec=rshare-app
+Icon=rshare
+Terminal=false
+Type=Application
+Categories=Network;FileTransfer;Utility;
+Keywords=file;share;upload;download;

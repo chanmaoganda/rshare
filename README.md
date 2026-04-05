@@ -106,13 +106,18 @@ Legacy `--admin-token` values are automatically migrated to a DB token named "ad
 
 ## CLI Usage
 
+The CLI reads server URL and auth token from `~/.config/rshare/config.json` (shared with the desktop app) as defaults. Explicit flags override the saved config.
+
 ```bash
-# Upload a file
+# Upload a file (uses saved server URL + token)
 rshare-cli upload myfile.zip
 # → Uploaded: myfile.zip (id: <uuid>)
 # → Delete token: <token>
 
-# Upload with auth token (required when API tokens are configured)
+# Override server URL
+rshare-cli -s http://192.168.1.100:8080 upload myfile.zip
+
+# Override auth token
 rshare-cli -t <token> upload myfile.zip
 
 # List files
@@ -137,8 +142,8 @@ rshare-cli share <id>
 
 | Flag | Env Var | Default | Description |
 |------|---------|---------|-------------|
-| `--server`, `-s` | — | `http://localhost:3000` | Server URL |
-| `--token`, `-t` | `RSHARE_ADMIN_TOKEN` | *(none)* | Auth token (API or per-file delete) |
+| `--server`, `-s` | — | Saved config, then `http://localhost:3000` | Server URL |
+| `--token`, `-t` | `RSHARE_ADMIN_TOKEN` | Saved config | Auth token (API or per-file delete) |
 
 ## Desktop App
 
@@ -147,7 +152,9 @@ rshare-app
 ```
 
 The Slint-based desktop app provides:
-- Server URL and token configuration
+- Server URL and token configuration (persisted to `~/.config/rshare/config.json`, shared with CLI)
+- Auto-connect on startup if saved server URL exists
+- Auto-refresh file list every 3 seconds while connected
 - File upload via native file picker
 - File list with download, delete, and share actions
 
@@ -162,21 +169,29 @@ cargo install cargo-apk
 export ANDROID_NDK_HOME=/path/to/ndk
 export ANDROID_HOME=/path/to/sdk
 
-# Build
+# Release build
 ./build.sh android
+adb install dist/rshare-app-v*-android.apk
 
-# Install
-adb install dist/rshare-app.apk
+# Debug build (allows adb shell inspection)
+./build-debug.sh --install
 ```
 
-The `android` feature flag enables the Slint Android backend and uses `rustls-tls` for HTTP.
+The `android` feature flag enables the Slint Android backend and uses `rustls-tls` for HTTP. Downloaded files are saved to `/sdcard/Download/rshare/` (user-accessible).
+
+> **Note:** Release and debug APKs have different signatures. You must `adb uninstall com.rshare.app` before switching between them.
 
 ## Build Script
 
 ```bash
-./build.sh desktop   # Server + CLI + desktop app → dist/
-./build.sh android   # Android APK → dist/
-./build.sh all       # Everything
+./build.sh desktop       # Server + CLI + desktop app → dist/
+./build.sh android       # Android release APK → dist/
+./build.sh all           # Everything
+./build-debug.sh         # Android debug APK → dist/rshare-app-debug.apk
+
+# Install (from dist/ to system PATH)
+./install.sh                  # Install to /usr/local/bin
+./install.sh --prefix ~/.local  # Install to ~/.local/bin
 
 # Release packaging
 ./release.sh 0.1.0             # Package release archives → release/

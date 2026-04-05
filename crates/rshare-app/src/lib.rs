@@ -6,6 +6,7 @@ slint::include_modules!();
 
 use api::Api;
 use slint::{ModelRc, SharedString, VecModel};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use store::Store;
 
@@ -37,12 +38,22 @@ pub fn run_app() {
     setup_delete(&app, &api, &store);
     setup_share(&app, &api);
 
+    // Auto-connect if saved server URL exists
+    if !saved.server_url.is_empty() {
+        app.invoke_connect();
+    }
+
     app.run().unwrap();
 }
 
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(android_app: slint::android::AndroidApp) {
+    let data_path = android_app
+        .internal_data_path()
+        .expect("internal_data_path unavailable");
+    store::set_android_data_dir(data_path);
+
     slint::android::init(android_app).unwrap();
 
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
@@ -74,6 +85,35 @@ fn setup_connect(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
                         app.set_connected(true);
                         app.set_settings_status(SharedString::from("Connected"));
                         app.invoke_refresh();
+
+                        // Start periodic refresh every 5 seconds
+                        let weak2 = app.as_weak();
+                        let connected_flag = Arc::new(AtomicBool::new(true));
+                        let flag_clone = connected_flag.clone();
+                        // Store flag so disconnect can stop the timer
+                        // (connected_flag stays alive via the spawned task)
+                        tokio::spawn(async move {
+                            loop {
+                                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                                if !flag_clone.load(Ordering::Relaxed) {
+                                    break;
+                                }
+                                let weak2 = weak2.clone();
+                                let flag = flag_clone.clone();
+                                if slint::invoke_from_event_loop(move || {
+                                    let app = weak2.unwrap();
+                                    if app.get_connected() {
+                                        app.invoke_refresh();
+                                    } else {
+                                        flag.store(false, Ordering::Relaxed);
+                                    }
+                                })
+                                .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        });
                     }
                     Err(e) => {
                         app.set_connected(false);
@@ -373,7 +413,8 @@ async fn save_file(suggested_name: &str) -> Option<String> {
 
 #[cfg(not(feature = "desktop"))]
 async fn save_file(suggested_name: &str) -> Option<String> {
-    let dir = store::app_data_dir().join("downloads");
+    // Save to public Downloads folder so users can access files
+    let dir = std::path::PathBuf::from("/sdcard/Download/rshare");
     tokio::fs::create_dir_all(&dir).await.ok()?;
     let path = dir.join(suggested_name);
     Some(path.to_string_lossy().to_string())

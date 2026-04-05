@@ -6,11 +6,11 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "rshare", about = "rshare file sharing CLI")]
 struct Cli {
-    /// Server URL
-    #[arg(short, long, default_value = "http://localhost:3000")]
-    server: String,
+    /// Server URL (reads from ~/.config/rshare/config.json if not set)
+    #[arg(short, long)]
+    server: Option<String>,
 
-    /// Admin token for protected operations (delete)
+    /// Admin token for protected operations (reads from config or RSHARE_ADMIN_TOKEN)
     #[arg(short = 't', long, env = "RSHARE_ADMIN_TOKEN")]
     token: Option<String>,
 
@@ -47,23 +47,63 @@ enum Commands {
     },
 }
 
+/// Saved config from rshare-app (shared between CLI and GUI).
+#[derive(serde::Deserialize, Default)]
+struct SavedConfig {
+    #[serde(default)]
+    server_url: String,
+    #[serde(default)]
+    admin_token: String,
+}
+
+fn load_saved_config() -> SavedConfig {
+    let path = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("rshare")
+        .join("config.json");
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    let saved = load_saved_config();
+
+    let server = cli
+        .server
+        .unwrap_or_else(|| {
+            if !saved.server_url.is_empty() {
+                saved.server_url.clone()
+            } else {
+                "http://localhost:3000".to_string()
+            }
+        });
+
+    let token = cli.token.or_else(|| {
+        if saved.admin_token.is_empty() {
+            None
+        } else {
+            Some(saved.admin_token.clone())
+        }
+    });
+
     let client = reqwest::Client::new();
 
     let result = match cli.command {
         Commands::Upload { file } => {
-            commands::upload(&client, &cli.server, &file, cli.token.as_deref()).await
+            commands::upload(&client, &server, &file, token.as_deref()).await
         }
         Commands::Download { id, output } => {
-            commands::download(&client, &cli.server, &id, output.as_deref()).await
+            commands::download(&client, &server, &id, output.as_deref()).await
         }
-        Commands::List => commands::list(&client, &cli.server).await,
+        Commands::List => commands::list(&client, &server).await,
         Commands::Delete { id } => {
-            commands::delete(&client, &cli.server, &id, cli.token.as_deref()).await
+            commands::delete(&client, &server, &id, token.as_deref()).await
         }
-        Commands::Share { id } => commands::share(&client, &cli.server, &id).await,
+        Commands::Share { id } => commands::share(&client, &server, &id).await,
     };
 
     if let Err(e) = result {
