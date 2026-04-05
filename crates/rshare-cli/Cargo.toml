@@ -1,16 +1,16 @@
 [package]
 name = "rshare-cli"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
-rshare-common = { path = "../rshare-common" }
-clap = { version = "4", features = ["derive", "env"] }
-reqwest = { version = "0.12", features = ["multipart", "stream", "json"] }
-tokio = { version = "1", features = ["full"] }
-indicatif = "0.17"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-anyhow = "1"
-sha2 = "0.10"
-tokio-util = { version = "0.7", features = ["io"] }
+rshare-common.workspace = true
+clap.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+indicatif.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+sha2.workspace = true
+tokio-util.workspace = true
