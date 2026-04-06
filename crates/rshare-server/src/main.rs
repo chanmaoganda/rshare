@@ -9,6 +9,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, post};
 use clap::Parser;
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
@@ -22,6 +23,7 @@ pub struct AppState {
     pub storage: Arc<Storage>,
     pub admin_token: Option<String>,
     pub default_ttl_hours: u64,
+    pub upload_semaphore: Arc<Semaphore>,
 }
 
 #[tokio::main]
@@ -80,6 +82,7 @@ async fn main() {
         storage: Arc::new(storage),
         admin_token: cfg.admin_token,
         default_ttl_hours: cfg.default_ttl_hours,
+        upload_semaphore: Arc::new(Semaphore::new(cfg.max_concurrent_uploads)),
     };
 
     // Spawn background cleanup task for expired files

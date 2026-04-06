@@ -35,3 +35,4 @@ slint = "1"
 slint-build = "1"
 rfd = { version = "0.15" }
 dirs = "6"
+arboard = "3"

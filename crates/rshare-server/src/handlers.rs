@@ -25,10 +25,42 @@ fn sanitize_filename(raw: &str) -> String {
     if name.is_empty() {
         "unnamed".to_string()
     } else if name.len() > 255 {
-        name[..255].to_string()
+        // Find the last char boundary at or before 255 bytes to avoid panic on multibyte chars
+        let mut end = 255;
+        while !name.is_char_boundary(end) {
+            end -= 1;
+        }
+        name[..end].to_string()
     } else {
         name
     }
+}
+
+fn content_disposition(filename: &str) -> String {
+    // ASCII fallback: strip non-ASCII, escape quotes
+    let ascii_name: String = filename
+        .chars()
+        .filter(|c| c.is_ascii() && *c != '"' && *c != '\\')
+        .collect();
+    // RFC 5987 percent-encoded UTF-8 filename
+    let encoded: String = filename
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'-' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect();
+    format!("attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}")
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
 }
 
 fn err(status: StatusCode, msg: impl Into<String>) -> Response {
@@ -55,6 +87,16 @@ pub async fn upload(
     if let Err(resp) = auth.require_permission("upload") {
         return resp;
     }
+
+    let _permit = match state.upload_semaphore.try_acquire() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return err(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many concurrent uploads, try again later",
+            );
+        }
+    };
 
     tracing::debug!("Upload request received");
 
@@ -144,8 +186,13 @@ pub struct ListParams {
 
 pub async fn list_files(
     State(state): State<AppState>,
+    auth: AuthContext,
     Query(params): Query<ListParams>,
 ) -> Response {
+    if let Err(resp) = auth.require_permission("download") {
+        return resp;
+    }
+
     let page = params.page.unwrap_or(1).max(1);
     let per_page = params.per_page.unwrap_or(50).min(200);
     match state.db.list(page, per_page) {
@@ -365,10 +412,10 @@ pub async fn share_page(
 </div>
 </body>
 </html>"#,
-        name = meta.name,
-        size = size_str,
-        expiry = expiry_str,
-        token = token,
+        name = html_escape(&meta.name),
+        size = html_escape(&size_str),
+        expiry = html_escape(&expiry_str),
+        token = html_escape(&token),
     );
 
     Html(html).into_response()
@@ -417,13 +464,25 @@ async fn serve_range_stream(
     use tokio::io::AsyncSeekExt;
     use tokio_util::io::ReaderStream;
 
-    let range_start = headers
+    // Parse Range header: bytes=START-END (END is optional)
+    let (range_start, range_end) = headers
         .get(header::RANGE)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("bytes="))
-        .and_then(|v| v.split('-').next())
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(0);
+        .map(|v| {
+            let mut parts = v.splitn(2, '-');
+            let start = parts
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+            let end = parts
+                .next()
+                .filter(|s| !s.is_empty())
+                .and_then(|s| s.parse::<u64>().ok())
+                .map(|e| e.min(total - 1)); // clamp to file size
+            (start, end)
+        })
+        .unwrap_or((0, None));
 
     if range_start >= total {
         return Response::builder()
@@ -432,6 +491,8 @@ async fn serve_range_stream(
             .body(Body::empty())
             .unwrap();
     }
+
+    let range_end = range_end.unwrap_or(total - 1);
 
     if range_start > 0
         && let Err(e) = file.seek(std::io::SeekFrom::Start(range_start)).await
@@ -442,14 +503,14 @@ async fn serve_range_stream(
         );
     }
 
-    let remaining = total - range_start;
-    let stream = ReaderStream::new(file.take(remaining));
+    let length = range_end - range_start + 1;
+    let stream = ReaderStream::new(file.take(length));
     let body = Body::from_stream(stream);
 
-    let (status, content_range) = if range_start > 0 {
+    let (status, content_range) = if range_start > 0 || range_end < total - 1 {
         (
             StatusCode::PARTIAL_CONTENT,
-            Some(format!("bytes {range_start}-{}/{total}", total - 1)),
+            Some(format!("bytes {range_start}-{range_end}/{total}")),
         )
     } else {
         (StatusCode::OK, None)
@@ -458,11 +519,8 @@ async fn serve_range_stream(
     let mut builder = Response::builder()
         .status(status)
         .header(header::CONTENT_TYPE, content_type)
-        .header(
-            header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{filename}\""),
-        )
-        .header(header::CONTENT_LENGTH, remaining)
+        .header(header::CONTENT_DISPOSITION, content_disposition(filename))
+        .header(header::CONTENT_LENGTH, length)
         .header(header::ACCEPT_RANGES, "bytes");
 
     if let Some(cr) = content_range {

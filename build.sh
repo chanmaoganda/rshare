@@ -133,6 +133,41 @@ package_dist() {
     echo "    -> $DIST/$app_name"
 }
 
+# ─── Android aapt wrapper ─────────────────────────────────────
+# cargo-apk doesn't pass -S to aapt for custom resources. We create
+# a wrapper that intercepts the `aapt package` command and injects
+# `-S <res_dir>` when our res/ directory exists.
+
+setup_aapt_wrapper() {
+    local res_dir
+    res_dir=$(realpath "crates/rshare-app/res")
+    local sdk="${ANDROID_HOME:-/opt/android-sdk}"
+    local build_tools
+    build_tools=$(ls -1d "$sdk/build-tools/"* 2>/dev/null | sort -V | tail -1)
+    local real_aapt="$build_tools/aapt"
+
+    AAPT_WRAPPER_DIR=$(mktemp -d)
+    cat > "$AAPT_WRAPPER_DIR/aapt" <<WRAPPER
+#!/bin/bash
+# Wrapper: inject -S res_dir into aapt package calls
+if [ "\$1" = "package" ] && [ -d "$res_dir" ]; then
+    exec "$real_aapt" "\$1" -S "$res_dir" "\${@:2}"
+else
+    exec "$real_aapt" "\$@"
+fi
+WRAPPER
+    chmod +x "$AAPT_WRAPPER_DIR/aapt"
+    export PATH="$AAPT_WRAPPER_DIR:$PATH"
+    echo "    aapt wrapper installed (res: $res_dir)"
+}
+
+teardown_aapt_wrapper() {
+    if [ -n "${AAPT_WRAPPER_DIR:-}" ] && [ -d "$AAPT_WRAPPER_DIR" ]; then
+        rm -rf "$AAPT_WRAPPER_DIR"
+        unset AAPT_WRAPPER_DIR
+    fi
+}
+
 # ─── Android ───────────────────────────────────────────────────
 
 build_android() {
@@ -156,7 +191,15 @@ build_android() {
 
     resolve_android_jar
 
+    # Set up aapt wrapper to inject icon resources
+    if [ -d "crates/rshare-app/res" ]; then
+        setup_aapt_wrapper
+    fi
+
     cargo apk build -p rshare-app --lib --no-default-features --features android --release
+
+    teardown_aapt_wrapper
+
     mkdir -p "$DIST"
 
     local apk_path="target/release/apk/rshare-app.apk"

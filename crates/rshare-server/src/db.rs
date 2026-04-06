@@ -106,7 +106,7 @@ impl Db {
         raw_token: &str,
         permissions: &[String],
     ) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let id = Uuid::new_v4().to_string();
         conn.execute(
             "INSERT INTO api_tokens (id, name, token_hash, permissions, created_at)
@@ -123,7 +123,7 @@ impl Db {
     }
 
     pub fn get_token_by_hash(&self, raw_token: &str) -> Result<Option<ApiToken>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let token_hash = hash_token(raw_token);
         let mut stmt = conn.prepare(
             "SELECT name, permissions, created_at FROM api_tokens WHERE token_hash = ?1",
@@ -151,7 +151,7 @@ impl Db {
     }
 
     pub fn list_tokens(&self) -> Result<Vec<ApiToken>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt =
             conn.prepare("SELECT name, permissions, created_at FROM api_tokens ORDER BY name")?;
         let rows = stmt.query_map([], |row| {
@@ -171,13 +171,13 @@ impl Db {
     }
 
     pub fn delete_token(&self, name: &str) -> Result<bool, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let count = conn.execute("DELETE FROM api_tokens WHERE name = ?1", params![name])?;
         Ok(count > 0)
     }
 
     pub fn has_any_tokens(&self) -> Result<bool, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM api_tokens", [], |row| row.get(0))?;
         Ok(count > 0)
     }
@@ -185,7 +185,7 @@ impl Db {
     // --- File methods ---
 
     pub fn insert(&self, meta: &FileMetadata, delete_token: &str) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         conn.execute(
             "INSERT INTO files (id, name, size, uploaded_at, share_token, delete_token, content_type, sha256, expires_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -205,7 +205,7 @@ impl Db {
     }
 
     pub fn get_delete_token(&self, id: Uuid) -> Result<Option<String>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = conn.prepare("SELECT delete_token FROM files WHERE id = ?1")?;
         let mut rows = stmt.query_map(params![id.to_string()], |row| row.get(0))?;
         match rows.next() {
@@ -220,7 +220,7 @@ impl Db {
         page: u32,
         per_page: u32,
     ) -> Result<(Vec<FileMetadata>, u64), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let total: i64 = conn.query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))?;
         let offset = (page.saturating_sub(1) * per_page) as i64;
         let mut stmt = conn.prepare(&format!(
@@ -232,7 +232,7 @@ impl Db {
     }
 
     pub fn get(&self, id: Uuid) -> Result<Option<FileMetadata>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = conn.prepare(&format!("SELECT {FILE_COLUMNS} FROM files WHERE id = ?1"))?;
         let mut rows = stmt.query_map(params![id.to_string()], parse_file_row)?;
         match rows.next() {
@@ -243,7 +243,7 @@ impl Db {
     }
 
     pub fn get_by_share_token(&self, token: &str) -> Result<Option<FileMetadata>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = conn.prepare(&format!(
             "SELECT {FILE_COLUMNS} FROM files WHERE share_token = ?1"
         ))?;
@@ -256,13 +256,13 @@ impl Db {
     }
 
     pub fn delete(&self, id: Uuid) -> Result<bool, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let count = conn.execute("DELETE FROM files WHERE id = ?1", params![id.to_string()])?;
         Ok(count > 0)
     }
 
     pub fn list_expired(&self) -> Result<Vec<Uuid>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let now = Utc::now().to_rfc3339();
         let mut stmt =
             conn.prepare("SELECT id FROM files WHERE expires_at IS NOT NULL AND expires_at < ?1")?;
@@ -278,7 +278,7 @@ impl Db {
     }
 
     pub fn set_share_token(&self, id: Uuid, token: &str) -> Result<bool, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let count = conn.execute(
             "UPDATE files SET share_token = ?1 WHERE id = ?2",
             params![token, id.to_string()],

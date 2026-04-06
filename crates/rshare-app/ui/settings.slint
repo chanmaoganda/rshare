@@ -5,6 +5,7 @@ export component SettingsBar inherits Rectangle {
     in-out property <string> server-url: "http://localhost:3000";
     in-out property <string> admin-token: "";
     in property <bool> connected: false;
+    in property <bool> connecting: false;
     in property <string> status-message: "";
     in property <bool> compact: false;
     callback connect();
@@ -52,7 +53,7 @@ export component SettingsBar inherits Rectangle {
                 spacing: Style.sp-sm;
 
                 LineEdit {
-                    placeholder-text: "Token";
+                    placeholder-text: "Token (optional)";
                     text <=> root.admin-token;
                     input-type: password;
                     font-size: 13px;
@@ -60,7 +61,8 @@ export component SettingsBar inherits Rectangle {
                 }
 
                 PrimaryButton {
-                    label: root.connected ? "Reconnect" : "Connect";
+                    label: root.connecting ? "Connecting..." : root.connected ? "Reconnect" : "Connect";
+                    enabled: !root.connecting;
                     clicked => { root.connect(); }
                 }
             }
@@ -78,7 +80,7 @@ export component SettingsBar inherits Rectangle {
             }
 
             LineEdit {
-                placeholder-text: "Admin token";
+                placeholder-text: "Token (optional)";
                 text <=> root.admin-token;
                 input-type: password;
                 horizontal-stretch: 1;
@@ -86,7 +88,8 @@ export component SettingsBar inherits Rectangle {
             }
 
             PrimaryButton {
-                label: root.connected ? "Reconnect" : "Connect";
+                label: root.connecting ? "Connecting..." : root.connected ? "Reconnect" : "Connect";
+                enabled: !root.connecting;
                 clicked => { root.connect(); }
             }
         }

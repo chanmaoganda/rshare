@@ -7,7 +7,7 @@ slint::include_modules!();
 use api::Api;
 use slint::{ModelRc, SharedString, VecModel};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use store::Store;
 
 /// Create the Slint UI, wire all callbacks, and run the event loop.
@@ -31,15 +31,21 @@ pub fn run_app() {
         app.set_admin_token(SharedString::from(&saved.admin_token));
     }
 
-    setup_connect(&app, &api, &store);
+    // Shared flag to cancel old refresh timers when reconnecting
+    let refresh_flag: Arc<Mutex<Arc<AtomicBool>>> =
+        Arc::new(Mutex::new(Arc::new(AtomicBool::new(false))));
+
+    setup_connect(&app, &api, &store, &refresh_flag);
     setup_refresh(&app, &api);
     setup_upload(&app, &api, &store);
     setup_download(&app, &api);
     setup_delete(&app, &api, &store);
     setup_share(&app, &api);
+    setup_copy_share_url(&app);
 
     // Auto-connect if saved server URL exists
     if !saved.server_url.is_empty() {
+        app.set_settings_status(SharedString::from("Reconnecting to saved server..."));
         app.invoke_connect();
     }
 
@@ -62,23 +68,57 @@ fn android_main(android_app: slint::android::AndroidApp) {
     run_app();
 }
 
-fn setup_connect(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
+fn setup_connect(
+    app: &App,
+    api: &Arc<Api>,
+    store: &Arc<Store>,
+    refresh_flag: &Arc<Mutex<Arc<AtomicBool>>>,
+) {
     let weak = app.as_weak();
     let api = api.clone();
     let store = store.clone();
+    let refresh_flag = refresh_flag.clone();
     app.on_connect(move || {
         let weak = weak.clone();
         let api = api.clone();
         let store = store.clone();
-        let app_ref = weak.unwrap();
+        let refresh_flag = refresh_flag.clone();
+        let app_ref = match weak.upgrade() {
+            Some(app) => app,
+            None => return,
+        };
         let server = app_ref.get_server_url().to_string();
         let token = app_ref.get_admin_token().to_string();
+
+        // URL validation
+        if !server.starts_with("http://") && !server.starts_with("https://") {
+            app_ref.set_connected(false);
+            app_ref.set_connecting(false);
+            app_ref.set_settings_status(SharedString::from(
+                "URL must start with http:// or https://",
+            ));
+            return;
+        }
+
+        // Cancel any existing refresh timer
+        if let Ok(old_flag) = refresh_flag.lock() {
+            old_flag.store(false, Ordering::Relaxed);
+        }
+
+        // Show connecting state
+        app_ref.set_connecting(true);
+        app_ref.set_settings_status(SharedString::from("Connecting..."));
+
         tokio::spawn(async move {
             let result = api.test_connection(&server).await;
             let server2 = server.clone();
             let token2 = token.clone();
-            slint::invoke_from_event_loop(move || {
-                let app = weak.unwrap();
+            let _ = slint::invoke_from_event_loop(move || {
+                let app = match weak.upgrade() {
+                    Some(app) => app,
+                    None => return,
+                };
+                app.set_connecting(false);
                 match result {
                     Ok(()) => {
                         store.set_server(&server2, &token2);
@@ -86,12 +126,13 @@ fn setup_connect(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
                         app.set_settings_status(SharedString::from("Connected"));
                         app.invoke_refresh();
 
-                        // Start periodic refresh every 5 seconds
+                        // Start periodic refresh every 3 seconds
+                        let new_flag = Arc::new(AtomicBool::new(true));
+                        if let Ok(mut stored) = refresh_flag.lock() {
+                            *stored = new_flag.clone();
+                        }
+                        let flag_clone = new_flag;
                         let weak2 = app.as_weak();
-                        let connected_flag = Arc::new(AtomicBool::new(true));
-                        let flag_clone = connected_flag.clone();
-                        // Store flag so disconnect can stop the timer
-                        // (connected_flag stays alive via the spawned task)
                         tokio::spawn(async move {
                             loop {
                                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
@@ -101,9 +142,12 @@ fn setup_connect(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
                                 let weak2 = weak2.clone();
                                 let flag = flag_clone.clone();
                                 if slint::invoke_from_event_loop(move || {
-                                    let app = weak2.unwrap();
-                                    if app.get_connected() {
-                                        app.invoke_refresh();
+                                    if let Some(app) = weak2.upgrade() {
+                                        if app.get_connected() {
+                                            app.invoke_refresh();
+                                        } else {
+                                            flag.store(false, Ordering::Relaxed);
+                                        }
                                     } else {
                                         flag.store(false, Ordering::Relaxed);
                                     }
@@ -115,13 +159,14 @@ fn setup_connect(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
                             }
                         });
                     }
-                    Err(e) => {
+                    Err(_e) => {
                         app.set_connected(false);
-                        app.set_settings_status(SharedString::from(format!("Error: {e}")));
+                        app.set_settings_status(SharedString::from(
+                            "Could not reach server \u{2014} check the URL and try again",
+                        ));
                     }
                 }
-            })
-            .unwrap();
+            });
         });
     });
 }
@@ -132,47 +177,48 @@ fn setup_refresh(app: &App, api: &Arc<Api>) {
     app.on_refresh(move || {
         let weak = weak.clone();
         let api = api.clone();
-        let server = weak.unwrap().get_server_url().to_string();
-        slint::invoke_from_event_loop({
+        let server = match weak.upgrade() {
+            Some(app) => app,
+            None => return,
+        }
+        .get_server_url()
+        .to_string();
+        let _ = slint::invoke_from_event_loop({
             let weak = weak.clone();
-            move || weak.unwrap().set_list_loading(true)
-        })
-        .unwrap();
+            move || {
+                if let Some(app) = weak.upgrade() {
+                    app.set_list_loading(true);
+                }
+            }
+        });
 
         tokio::spawn(async move {
             let result = api.list_files(&server).await;
-            slint::invoke_from_event_loop(move || {
-                let app = weak.unwrap();
+            let _ = slint::invoke_from_event_loop(move || {
+                let app = match weak.upgrade() {
+                    Some(app) => app,
+                    None => return,
+                };
                 app.set_list_loading(false);
                 match result {
                     Ok(files) => {
-                        let entries: Vec<FileEntry> = files
-                            .iter()
-                            .map(|f| {
-                                let (id, name, size, date, content_type, sha256, expires_at) =
-                                    models::file_to_entry(f);
-                                FileEntry {
-                                    id,
-                                    name,
-                                    size,
-                                    uploaded_at: date,
-                                    content_type,
-                                    sha256,
-                                    expires_at,
-                                }
-                            })
-                            .collect();
+                        let entries: Vec<FileEntry> =
+                            files.iter().map(models::file_to_entry).collect();
                         app.set_files(ModelRc::new(VecModel::from(entries)));
                         app.set_list_status(SharedString::default());
                         app.set_list_status_is_error(false);
                     }
-                    Err(e) => {
-                        app.set_list_status(SharedString::from(format!("Error: {e}")));
+                    Err(_e) => {
+                        app.set_list_status(SharedString::from(
+                            "Connection lost \u{2014} click Reconnect",
+                        ));
                         app.set_list_status_is_error(true);
+                        // Mark disconnected so user knows to reconnect
+                        app.set_connected(false);
+                        app.set_settings_status(SharedString::from("Disconnected"));
                     }
                 }
-            })
-            .unwrap();
+            });
         });
     });
 }
@@ -185,7 +231,12 @@ fn setup_upload(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
         let weak = weak.clone();
         let api = api.clone();
         let store = store.clone();
-        let server = weak.unwrap().get_server_url().to_string();
+        let server = match weak.upgrade() {
+            Some(app) => app,
+            None => return,
+        }
+        .get_server_url()
+        .to_string();
 
         tokio::spawn(async move {
             let file = match pick_file().await {
@@ -193,14 +244,15 @@ fn setup_upload(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
                 None => return,
             };
 
-            slint::invoke_from_event_loop({
+            let _ = slint::invoke_from_event_loop({
                 let weak = weak.clone();
                 move || {
-                    weak.unwrap().set_uploading(true);
-                    weak.unwrap().set_upload_result(SharedString::default());
+                    if let Some(app) = weak.upgrade() {
+                        app.set_uploading(true);
+                        app.set_upload_result(SharedString::default());
+                    }
                 }
-            })
-            .unwrap();
+            });
 
             let admin_token = store.get().admin_token;
             let token = if admin_token.is_empty() {
@@ -210,8 +262,11 @@ fn setup_upload(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
             };
             let result = api.upload(&server, &file.0, file.1, token.as_deref()).await;
 
-            slint::invoke_from_event_loop(move || {
-                let app = weak.unwrap();
+            let _ = slint::invoke_from_event_loop(move || {
+                let app = match weak.upgrade() {
+                    Some(app) => app,
+                    None => return,
+                };
                 app.set_uploading(false);
                 match result {
                     Ok(info) => {
@@ -223,14 +278,17 @@ fn setup_upload(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
                         )));
                         app.set_upload_is_error(false);
                         app.invoke_refresh();
+                        // Auto-clear success message after 4 seconds
+                        auto_clear_upload(weak.clone(), 4);
                     }
                     Err(e) => {
-                        app.set_upload_result(SharedString::from(format!("Error: {e}")));
+                        app.set_upload_result(SharedString::from(format!(
+                            "Upload failed \u{2014} {e}"
+                        )));
                         app.set_upload_is_error(true);
                     }
                 }
-            })
-            .unwrap();
+            });
         });
     });
 }
@@ -241,19 +299,26 @@ fn setup_download(app: &App, api: &Arc<Api>) {
     app.on_download(move |id| {
         let weak = weak.clone();
         let api = api.clone();
-        let server = weak.unwrap().get_server_url().to_string();
+        let server = match weak.upgrade() {
+            Some(app) => app,
+            None => return,
+        }
+        .get_server_url()
+        .to_string();
         let id = id.to_string();
 
         tokio::spawn(async move {
             let (filename, data) = match api.download(&server, &id).await {
                 Ok(r) => r,
                 Err(e) => {
-                    slint::invoke_from_event_loop(move || {
-                        let app = weak.unwrap();
-                        app.set_list_status(SharedString::from(format!("Download error: {e}")));
-                        app.set_list_status_is_error(true);
-                    })
-                    .unwrap();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(app) = weak.upgrade() {
+                            app.set_list_status(SharedString::from(format!(
+                                "Download failed \u{2014} {e}"
+                            )));
+                            app.set_list_status_is_error(true);
+                        }
+                    });
                     return;
                 }
             };
@@ -265,20 +330,25 @@ fn setup_download(app: &App, api: &Arc<Api>) {
 
             let write_result = tokio::fs::write(&save_path, &data).await;
 
-            slint::invoke_from_event_loop(move || {
-                let app = weak.unwrap();
+            let _ = slint::invoke_from_event_loop(move || {
+                let app = match weak.upgrade() {
+                    Some(app) => app,
+                    None => return,
+                };
                 match write_result {
                     Ok(()) => {
                         app.set_list_status(SharedString::from(format!("Saved to: {save_path}")));
                         app.set_list_status_is_error(false);
+                        auto_clear_list_status(weak.clone(), 4);
                     }
                     Err(e) => {
-                        app.set_list_status(SharedString::from(format!("Save error: {e}")));
+                        app.set_list_status(SharedString::from(format!(
+                            "Save failed \u{2014} {e}"
+                        )));
                         app.set_list_status_is_error(true);
                     }
                 }
-            })
-            .unwrap();
+            });
         });
     });
 }
@@ -291,7 +361,10 @@ fn setup_delete(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
         let weak = weak.clone();
         let api = api.clone();
         let store = store.clone();
-        let app_ref = weak.unwrap();
+        let app_ref = match weak.upgrade() {
+            Some(app) => app,
+            None => return,
+        };
         let server = app_ref.get_server_url().to_string();
         let admin_token = app_ref.get_admin_token().to_string();
         let id = id.to_string();
@@ -308,22 +381,27 @@ fn setup_delete(app: &App, api: &Arc<Api>, store: &Arc<Store>) {
         tokio::spawn(async move {
             let result = api.delete(&server, &id, token.as_deref()).await;
 
-            slint::invoke_from_event_loop(move || {
-                let app = weak.unwrap();
+            let _ = slint::invoke_from_event_loop(move || {
+                let app = match weak.upgrade() {
+                    Some(app) => app,
+                    None => return,
+                };
                 match result {
                     Ok(()) => {
                         store.remove_delete_token(&id);
                         app.set_list_status(SharedString::from("Deleted"));
                         app.set_list_status_is_error(false);
                         app.invoke_refresh();
+                        auto_clear_list_status(weak.clone(), 4);
                     }
                     Err(e) => {
-                        app.set_list_status(SharedString::from(format!("Delete error: {e}")));
+                        app.set_list_status(SharedString::from(format!(
+                            "Could not delete file \u{2014} {e}"
+                        )));
                         app.set_list_status_is_error(true);
                     }
                 }
-            })
-            .unwrap();
+            });
         });
     });
 }
@@ -334,26 +412,36 @@ fn setup_share(app: &App, api: &Arc<Api>) {
     app.on_share(move |id| {
         let weak = weak.clone();
         let api = api.clone();
-        let server = weak.unwrap().get_server_url().to_string();
+        let server = match weak.upgrade() {
+            Some(app) => app,
+            None => return,
+        }
+        .get_server_url()
+        .to_string();
         let id = id.to_string();
 
         tokio::spawn(async move {
             let result = api.share(&server, &id).await;
 
-            slint::invoke_from_event_loop(move || {
-                let app = weak.unwrap();
+            let _ = slint::invoke_from_event_loop(move || {
+                let app = match weak.upgrade() {
+                    Some(app) => app,
+                    None => return,
+                };
                 match result {
                     Ok(url) => {
-                        app.set_list_status(SharedString::from(format!("Share link: {url}")));
-                        app.set_list_status_is_error(false);
+                        app.set_share_url(SharedString::from(&url));
+                        // Auto-hide share URL after 30 seconds
+                        auto_clear_share_url(weak.clone(), 30);
                     }
                     Err(e) => {
-                        app.set_list_status(SharedString::from(format!("Share error: {e}")));
+                        app.set_list_status(SharedString::from(format!(
+                            "Could not create share link \u{2014} {e}"
+                        )));
                         app.set_list_status_is_error(true);
                     }
                 }
-            })
-            .unwrap();
+            });
         });
     });
 }
@@ -418,4 +506,83 @@ async fn save_file(suggested_name: &str) -> Option<String> {
     tokio::fs::create_dir_all(&dir).await.ok()?;
     let path = dir.join(suggested_name);
     Some(path.to_string_lossy().to_string())
+}
+
+// ── Auto-clear helpers ────────────────────────────────────────────
+
+fn auto_clear_upload(weak: slint::Weak<App>, secs: u64) {
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(app) = weak.upgrade() {
+                app.set_upload_result(SharedString::default());
+            }
+        });
+    });
+}
+
+fn auto_clear_list_status(weak: slint::Weak<App>, secs: u64) {
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(app) = weak.upgrade() {
+                app.set_list_status(SharedString::default());
+                app.set_list_status_is_error(false);
+            }
+        });
+    });
+}
+
+fn auto_clear_share_url(weak: slint::Weak<App>, secs: u64) {
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(app) = weak.upgrade() {
+                app.set_share_url(SharedString::default());
+            }
+        });
+    });
+}
+
+// ── Clipboard copy ────────────────────────────────────────────────
+
+fn setup_copy_share_url(app: &App) {
+    let weak = app.as_weak();
+    app.on_copy_share_url(move || {
+        let app = match weak.upgrade() {
+            Some(app) => app,
+            None => return,
+        };
+        let url = app.get_share_url().to_string();
+        if url.is_empty() {
+            return;
+        }
+
+        #[cfg(feature = "desktop")]
+        {
+            match arboard::Clipboard::new() {
+                Ok(mut clipboard) => {
+                    if clipboard.set_text(&url).is_ok() {
+                        app.set_list_status(SharedString::from("Share URL copied to clipboard"));
+                        app.set_list_status_is_error(false);
+                        auto_clear_list_status(weak.clone(), 3);
+                    }
+                }
+                Err(_) => {
+                    app.set_list_status(SharedString::from(
+                        "Could not access clipboard \u{2014} select and copy manually",
+                    ));
+                    app.set_list_status_is_error(true);
+                }
+            }
+        }
+
+        #[cfg(not(feature = "desktop"))]
+        {
+            // On Android, no clipboard API available — the LineEdit is already selectable
+            app.set_list_status(SharedString::from("Long-press the URL to copy"));
+            app.set_list_status_is_error(false);
+            auto_clear_list_status(weak.clone(), 3);
+        }
+    });
 }

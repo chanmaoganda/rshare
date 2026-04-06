@@ -36,10 +36,6 @@ pub struct Config {
     #[arg(long, default_value = "0")]
     pub default_ttl_hours: u64,
 
-    /// Rate limit: max uploads per minute per IP
-    #[arg(long, default_value = "10")]
-    pub rate_limit_per_minute: u32,
-
     /// Max concurrent uploads
     #[arg(long, default_value = "4")]
     pub max_concurrent_uploads: usize,

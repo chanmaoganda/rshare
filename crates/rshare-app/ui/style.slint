@@ -101,6 +101,94 @@ export component GhostButton inherits Rectangle {
     }
 }
 
+// Modal confirmation dialog overlay
+export component ConfirmDialog inherits Rectangle {
+    in property <string> message;
+    in property <string> confirm-label: "Delete";
+    in property <color> confirm-color: Style.danger;
+    callback confirm();
+    callback cancel();
+
+    background: #00000066;
+
+    // Block clicks from passing through
+    TouchArea {}
+
+    Rectangle {
+        width: min(360px, parent.width - 48px);
+        height: dialog-content.preferred-height + 48px;
+        background: Style.surface;
+        border-radius: Style.radius-md;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #00000033;
+
+        dialog-content := VerticalLayout {
+            padding: Style.sp-lg;
+            spacing: Style.sp-md;
+
+            Text {
+                text: root.message;
+                font-size: 14px;
+                font-weight: 500;
+                color: Style.text-primary;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+            }
+
+            HorizontalLayout {
+                spacing: Style.sp-sm;
+                alignment: center;
+
+                // Cancel button (ghost style)
+                Rectangle {
+                    height: 36px;
+                    width: max(80px, cancel-text.preferred-width + 32px);
+                    border-radius: Style.radius-sm;
+                    background: cancel-touch.has-hover ? Style.surface-hover : transparent;
+                    border-width: 1px;
+                    border-color: Style.border;
+
+                    cancel-text := Text {
+                        text: "Cancel";
+                        font-size: 13px;
+                        font-weight: 500;
+                        color: Style.text-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    cancel-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.cancel(); }
+                    }
+                }
+
+                // Confirm button (danger/colored)
+                Rectangle {
+                    height: 36px;
+                    width: max(80px, confirm-text.preferred-width + 32px);
+                    border-radius: Style.radius-sm;
+                    background: confirm-touch.has-hover ? root.confirm-color.darker(0.1) : root.confirm-color;
+
+                    confirm-text := Text {
+                        text: root.confirm-label;
+                        font-size: 13px;
+                        font-weight: 600;
+                        color: Style.text-on-primary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    confirm-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.confirm(); }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Colored badge / chip
 export component Badge inherits Rectangle {
     in property <string> label;

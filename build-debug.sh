@@ -39,10 +39,48 @@ fi
 
 resolve_android_jar
 
+# ─── aapt wrapper for icon resources ─────────────────────────
+
+setup_aapt_wrapper() {
+    local res_dir
+    res_dir=$(realpath "crates/rshare-app/res")
+    local sdk="${ANDROID_HOME:-/opt/android-sdk}"
+    local build_tools
+    build_tools=$(ls -1d "$sdk/build-tools/"* 2>/dev/null | sort -V | tail -1)
+    local real_aapt="$build_tools/aapt"
+
+    AAPT_WRAPPER_DIR=$(mktemp -d)
+    cat > "$AAPT_WRAPPER_DIR/aapt" <<WRAPPER
+#!/bin/bash
+if [ "\$1" = "package" ] && [ -d "$res_dir" ]; then
+    exec "$real_aapt" "\$1" -S "$res_dir" "\${@:2}"
+else
+    exec "$real_aapt" "\$@"
+fi
+WRAPPER
+    chmod +x "$AAPT_WRAPPER_DIR/aapt"
+    export PATH="$AAPT_WRAPPER_DIR:$PATH"
+    echo "    aapt wrapper installed (res: $res_dir)"
+}
+
+teardown_aapt_wrapper() {
+    if [ -n "${AAPT_WRAPPER_DIR:-}" ] && [ -d "$AAPT_WRAPPER_DIR" ]; then
+        rm -rf "$AAPT_WRAPPER_DIR"
+        unset AAPT_WRAPPER_DIR
+    fi
+}
+
 # ─── Build debug APK ─────────────────────────────────────────
 
 echo "==> Building rshare-app (Android debug APK)..."
+
+if [ -d "crates/rshare-app/res" ]; then
+    setup_aapt_wrapper
+fi
+
 cargo apk build -p rshare-app --lib --no-default-features --features android
+
+teardown_aapt_wrapper
 
 mkdir -p "$DIST"
 

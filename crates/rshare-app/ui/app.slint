@@ -20,6 +20,7 @@ export component App inherits Window {
     in-out property <string> server-url <=> settings.server-url;
     in-out property <string> admin-token <=> settings.admin-token;
     in property <bool> connected <=> settings.connected;
+    in property <bool> connecting <=> settings.connecting;
     in property <string> settings-status <=> settings.status-message;
 
     // Upload state
@@ -32,6 +33,7 @@ export component App inherits Window {
     in property <bool> list-loading <=> file-list.loading;
     in property <string> list-status <=> file-list.status-message;
     in property <bool> list-status-is-error <=> file-list.status-is-error;
+    in-out property <string> share-url <=> file-list.share-url;
 
     // Callbacks
     callback connect();
@@ -40,6 +42,7 @@ export component App inherits Window {
     callback download(string);
     callback delete-file(string);
     callback share(string);
+    callback copy-share-url();
 
     VerticalLayout {
         settings := SettingsBar {
@@ -64,6 +67,7 @@ export component App inherits Window {
             download(id) => { root.download(id); }
             delete-file(id) => { root.delete-file(id); }
             share(id) => { root.share(id); }
+            copy-share-url => { root.copy-share-url(); }
         }
     }
 }

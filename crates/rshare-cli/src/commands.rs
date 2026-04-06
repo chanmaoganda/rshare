@@ -12,6 +12,7 @@ pub async fn upload(
     server: &str,
     file_path: &Path,
     token: Option<&str>,
+    delete_tokens: &mut std::collections::HashMap<String, String>,
 ) -> Result<()> {
     let file_name = file_path
         .file_name()
@@ -51,11 +52,8 @@ pub async fn upload(
     let info: UploadResponse = resp.json().await?;
     println!("Uploaded: {} (id: {})", info.name, info.id);
     println!("SHA-256:  {}", info.sha256);
-    println!("Delete token: {}", info.delete_token);
-    println!(
-        "  (use: rshare-cli -t {} delete {})",
-        info.delete_token, info.id
-    );
+    println!("Delete token saved (use: rshare delete {})", info.id);
+    delete_tokens.insert(info.id.to_string(), info.delete_token);
     Ok(())
 }
 
@@ -84,7 +82,7 @@ pub async fn download(
         .unwrap_or_else(|| Path::new(&meta.name).to_path_buf());
 
     // Check if partial file exists for resume
-    let existing_len = if out_path.exists() {
+    let mut existing_len = if out_path.exists() {
         fs::metadata(&out_path).await?.len()
     } else {
         0
@@ -95,8 +93,21 @@ pub async fn download(
         println!("Resuming download from byte {existing_len}...");
         req = req.header("Range", format!("bytes={existing_len}-"));
     } else if existing_len == meta.size {
-        println!("File already fully downloaded: {}", out_path.display());
-        return Ok(());
+        // Verify checksum before declaring complete
+        if let Some(expected_sha256) = &meta.sha256 {
+            let file_data = fs::read(&out_path).await?;
+            let actual = format!("{:x}", Sha256::digest(&file_data));
+            if actual == *expected_sha256 {
+                println!("File already fully downloaded: {}", out_path.display());
+                println!("Checksum OK: {actual}");
+                return Ok(());
+            }
+            eprintln!("WARNING: Existing file checksum mismatch, re-downloading...");
+            existing_len = 0; // Force full re-download
+        } else {
+            println!("File already fully downloaded: {}", out_path.display());
+            return Ok(());
+        }
     }
 
     let resp = req.send().await?;
@@ -165,8 +176,8 @@ pub async fn list(client: &Client, server: &str) -> Result<()> {
     }
 
     let body: serde_json::Value = resp.json().await?;
-    let files: Vec<FileMetadata> =
-        serde_json::from_value(body["files"].clone()).unwrap_or_default();
+    let files: Vec<FileMetadata> = serde_json::from_value(body["files"].clone())
+        .context("Server response missing or invalid 'files' field")?;
     let total = body["total"].as_u64().unwrap_or(files.len() as u64);
     let page = body["page"].as_u64().unwrap_or(1);
     let per_page = body["per_page"].as_u64().unwrap_or(50);
@@ -248,6 +259,10 @@ fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        format!("{}...", &s[..max - 3])
+        let mut end = max - 3;
+        while !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &s[..end])
     }
 }

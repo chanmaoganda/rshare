@@ -48,11 +48,11 @@ impl Store {
     }
 
     pub fn get(&self) -> AppStore {
-        self.data.lock().unwrap().clone()
+        self.data.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn set_server(&self, url: &str, token: &str) {
-        let mut data = self.data.lock().unwrap();
+        let mut data = self.data.lock().unwrap_or_else(|e| e.into_inner());
         data.server_url = url.to_string();
         data.admin_token = token.to_string();
         drop(data);
@@ -60,7 +60,7 @@ impl Store {
     }
 
     pub fn add_delete_token(&self, file_id: &str, delete_token: &str) {
-        let mut data = self.data.lock().unwrap();
+        let mut data = self.data.lock().unwrap_or_else(|e| e.into_inner());
         data.delete_tokens
             .insert(file_id.to_string(), delete_token.to_string());
         drop(data);
@@ -77,20 +77,26 @@ impl Store {
     }
 
     pub fn remove_delete_token(&self, file_id: &str) {
-        let mut data = self.data.lock().unwrap();
+        let mut data = self.data.lock().unwrap_or_else(|e| e.into_inner());
         data.delete_tokens.remove(file_id);
         drop(data);
         self.save();
     }
 
     fn save(&self) {
-        let data = self.data.lock().unwrap();
+        let data = self.data.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(parent) = self.path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let json = serde_json::to_string_pretty(&*data).unwrap_or_default();
-        if let Err(e) = std::fs::write(&self.path, &json) {
-            eprintln!("[rshare] Failed to write config to {:?}: {e}", self.path);
+        match serde_json::to_string_pretty(&*data) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(&self.path, &json) {
+                    eprintln!("[rshare] Failed to write config to {:?}: {e}", self.path);
+                }
+            }
+            Err(e) => {
+                eprintln!("[rshare] Failed to serialize config: {e}");
+            }
         }
     }
 }
@@ -103,7 +109,9 @@ pub fn app_data_dir() -> PathBuf {
     {
         ANDROID_DATA_DIR
             .get()
-            .expect("android data dir not initialized — set_android_data_dir() must be called first")
+            .expect(
+                "android data dir not initialized — set_android_data_dir() must be called first",
+            )
             .clone()
     }
 

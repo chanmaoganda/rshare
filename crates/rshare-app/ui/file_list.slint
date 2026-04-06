@@ -1,5 +1,5 @@
-import { ListView } from "std-widgets.slint";
-import { Style, GhostButton, Badge } from "style.slint";
+import { ListView, LineEdit } from "std-widgets.slint";
+import { Style, GhostButton, Badge, ConfirmDialog } from "style.slint";
 
 export struct FileEntry {
     id: string,
@@ -9,6 +9,9 @@ export struct FileEntry {
     content-type: string,
     sha256: string,
     expires-at: string,
+    file-icon: string,
+    icon-color: color,
+    icon-bg: color,
 }
 
 // ── Desktop card: horizontal layout ──
@@ -17,6 +20,11 @@ component WideFileCard inherits Rectangle {
     in property <string> file-name;
     in property <string> file-size;
     in property <string> file-date;
+    in property <string> content-type;
+    in property <string> expires-at;
+    in property <string> file-icon;
+    in property <color> icon-color: Style.primary;
+    in property <color> icon-bg: Style.primary-light;
     callback download();
     callback delete-file();
     callback share();
@@ -43,13 +51,13 @@ component WideFileCard inherits Rectangle {
             width: 40px;
             height: 40px;
             border-radius: Style.radius-sm;
-            background: Style.primary-light;
+            background: root.icon-bg;
 
             Text {
-                text: "F";
-                font-size: 16px;
+                text: root.file-icon;
+                font-size: 10px;
                 font-weight: 700;
-                color: Style.primary;
+                color: root.icon-color;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -75,6 +83,12 @@ component WideFileCard inherits Rectangle {
                     label: root.file-size;
                     fg: Style.primary;
                     bg: Style.primary-light;
+                }
+
+                if root.expires-at != "": Badge {
+                    label: "Expires " + root.expires-at;
+                    fg: Style.warning;
+                    bg: Style.warning-light;
                 }
 
                 Text {
@@ -117,6 +131,8 @@ component CompactFileCard inherits Rectangle {
     in property <string> file-name;
     in property <string> file-size;
     in property <string> file-date;
+    in property <string> content-type;
+    in property <string> expires-at;
     callback download();
     callback delete-file();
     callback share();
@@ -155,6 +171,12 @@ component CompactFileCard inherits Rectangle {
                     label: root.file-size;
                     fg: Style.primary;
                     bg: Style.primary-light;
+                }
+
+                if root.expires-at != "": Badge {
+                    label: "Expires " + root.expires-at;
+                    fg: Style.warning;
+                    bg: Style.warning-light;
                 }
 
                 Text {
@@ -259,8 +281,8 @@ component FileDetailPanel inherits Rectangle {
             Badge { label: root.file.size; fg: Style.primary; bg: Style.primary-light; }
 
             GhostButton {
-                label: "X";
-                accent: Style.text-hint;
+                label: "Close";
+                accent: Style.text-secondary;
                 clicked => { root.close(); }
             }
         }
@@ -312,20 +334,43 @@ component EmptyState inherits Rectangle {
     }
 }
 
+component LoadingState inherits Rectangle {
+    height: 200px;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: Style.sp-sm;
+
+        Text {
+            text: "Loading files...";
+            font-size: 16px;
+            font-weight: 500;
+            color: Style.text-hint;
+            horizontal-alignment: center;
+        }
+    }
+}
+
 export component FileListView inherits Rectangle {
     in property <[FileEntry]> files: [];
     in property <bool> loading: false;
     in property <string> status-message: "";
     in property <bool> status-is-error: false;
     in property <bool> compact: false;
+    in-out property <string> share-url: "";
     callback refresh();
     callback download(string);
     callback delete-file(string);
     callback share(string);
+    callback copy-share-url();
 
     // Track selected file for detail view
     property <int> selected-index: -1;
     property <bool> showing-detail: selected-index >= 0 && selected-index < files.length;
+
+    // Delete confirmation state
+    property <string> pending-delete-id: "";
+    property <string> pending-delete-name: "";
 
     background: Style.background;
 
@@ -373,7 +418,43 @@ export component FileListView inherits Rectangle {
             }
         }
 
+        // Share URL bar (shown prominently above file list)
+        if root.share-url != "": Rectangle {
+            height: 44px;
+            border-radius: Style.radius-sm;
+            background: Style.success-light;
+            border-width: 1px;
+            border-color: Style.success.with-alpha(0.3);
+
+            HorizontalLayout {
+                padding-left: Style.sp-sm;
+                padding-right: Style.sp-sm;
+                spacing: Style.sp-sm;
+                alignment: center;
+
+                LineEdit {
+                    text: root.share-url;
+                    read-only: true;
+                    font-size: 12px;
+                    horizontal-stretch: 1;
+                }
+
+                GhostButton {
+                    label: "Copy";
+                    accent: Style.success;
+                    clicked => { root.copy-share-url(); }
+                }
+
+                GhostButton {
+                    label: "Close";
+                    accent: Style.text-hint;
+                    clicked => { root.share-url = ""; }
+                }
+            }
+        }
+
         if root.files.length == 0 && !root.loading: EmptyState {}
+        if root.files.length == 0 && root.loading: LoadingState {}
 
         // ── File list OR detail panel ──
         // Always-present container so layout size is stable when switching views.
@@ -392,7 +473,8 @@ export component FileListView inherits Rectangle {
                     root.selected-index = -1;
                 }
                 delete-file => {
-                    root.delete-file(root.files[root.selected-index].id);
+                    root.pending-delete-id = root.files[root.selected-index].id;
+                    root.pending-delete-name = root.files[root.selected-index].name;
                     root.selected-index = -1;
                 }
                 share => {
@@ -414,9 +496,14 @@ export component FileListView inherits Rectangle {
                         file-name: file.name;
                         file-size: file.size;
                         file-date: file.uploaded-at;
+                        content-type: file.content-type;
+                        expires-at: file.expires-at;
+                        file-icon: file.file-icon;
+                        icon-color: file.icon-color;
+                        icon-bg: file.icon-bg;
                         select => { root.selected-index = i; }
                         download => { root.download(file.id); }
-                        delete-file => { root.delete-file(file.id); }
+                        delete-file => { root.pending-delete-id = file.id; root.pending-delete-name = file.name; }
                         share => { root.share(file.id); }
                     }
                 }
@@ -435,13 +522,33 @@ export component FileListView inherits Rectangle {
                         file-name: file.name;
                         file-size: file.size;
                         file-date: file.uploaded-at;
+                        content-type: file.content-type;
+                        expires-at: file.expires-at;
                         select => { root.selected-index = i; }
                         download => { root.download(file.id); }
-                        delete-file => { root.delete-file(file.id); }
+                        delete-file => { root.pending-delete-id = file.id; root.pending-delete-name = file.name; }
                         share => { root.share(file.id); }
                     }
                 }
             }
+        }
+
+    }
+
+    // Delete confirmation overlay (on top of everything)
+    if root.pending-delete-id != "": ConfirmDialog {
+        width: parent.width;
+        height: parent.height;
+        message: "Delete \"\{root.pending-delete-name}\"?";
+        confirm-label: "Delete";
+        confirm => {
+            root.delete-file(root.pending-delete-id);
+            root.pending-delete-id = "";
+            root.pending-delete-name = "";
+        }
+        cancel => {
+            root.pending-delete-id = "";
+            root.pending-delete-name = "";
         }
     }
 }
